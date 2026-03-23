@@ -1,0 +1,13 @@
+location:
+  city: Boskoop
+  radius_km: 20
+
+booking:
+  day: thursday
+  time_start: "19:00"
+  time_end: "21:30"
+  court_type: indoor  # indoor of outdoor
+  game_type: double   # double = 4 spelers
+
+session:
+  cookies_file: .session_cookies.json
