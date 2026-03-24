@@ -4,8 +4,8 @@ location:
 
 booking:
   day: thursday
-  time_start: "19:00"
-  time_end: "21:30"
+  time_start: "19:30"
+  time_end: "21:00"
   duration_minutes: 90  # 60 of 90 minuten
   court_type: indoor  # indoor of outdoor
   game_type: double   # double = 4 spelers

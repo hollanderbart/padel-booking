@@ -128,6 +128,16 @@ class PadelBooker:
         Als vandaag die dag is en het starttijdstip is nog niet verstreken,
         wordt vandaag teruggegeven. Anders de volgende week.
         """
+        return self._get_upcoming_booking_dates(count=1)[0]
+
+    def _get_upcoming_booking_dates(self, count: int = 3) -> list:
+        """
+        Geef een lijst van de eerstvolgende `count` boekingsdagen (bijv. de komende
+        3 donderdagen) terug, gesorteerd van vroegst naar latest.
+
+        Als vandaag de gewenste dag is maar het tijdslot al voorbij is, wordt
+        vandaag overgeslagen en begint de reeks bij volgende week.
+        """
         target_day_name = self.config["booking"]["day"].lower()
         target_weekday = WEEKDAYS.get(target_day_name)
         if target_weekday is None:
@@ -140,15 +150,14 @@ class PadelBooker:
         days_ahead = (target_weekday - today.weekday()) % 7
 
         if days_ahead == 0:
-            # Vandaag is de gewenste dag: check of het tijdslot al voorbij is
             slot_time = today.replace(
                 hour=target_hour, minute=target_minute, second=0, microsecond=0
             )
             if today >= slot_time:
-                # Tijdslot al voorbij: neem volgende week
                 days_ahead = 7
 
-        return today + timedelta(days=days_ahead)
+        first_date = today + timedelta(days=days_ahead)
+        return [first_date + timedelta(weeks=i) for i in range(count)]
 
     # ------------------------------------------------------------------
     # Browser setup
@@ -309,18 +318,22 @@ class PadelBooker:
     # Tijdslot selecteren
     # ------------------------------------------------------------------
 
-    def _find_timeslot(self, page: Page, club: dict) -> Optional[dict]:
+    def _find_timeslot(self, page: Page, club: dict, booking_date: Optional[datetime] = None) -> Optional[dict]:
         """
         Navigeer naar de clubpagina, stel filters in en zoek een tijdslot
         dat binnen het gewenste tijdvenster valt.
 
+        Args:
+            booking_date: De doeldatum. Als None, wordt de eerstvolgende boekingsdag gebruikt.
+
         Returns:
             Dict met 'slot_id', 'court_name', 'time_range' of None.
         """
-        time_start = self.config["booking"]["time_start"]   # bijv. "19:00"
-        time_end = self.config["booking"]["time_end"]       # bijv. "21:30"
+        time_start = self.config["booking"]["time_start"]   # bijv. "19:30"
+        time_end = self.config["booking"]["time_end"]       # bijv. "21:00"
         duration_minutes = int(self.config["booking"].get("duration_minutes", 90))
-        booking_date = self._get_next_booking_date()
+        if booking_date is None:
+            booking_date = self._get_next_booking_date()
         date_str = booking_date.strftime("%d-%m-%Y")
         game_type = self.config["booking"].get("game_type", "double").lower()
 
@@ -540,7 +553,11 @@ class PadelBooker:
         logger.info("'Afrekenen'-knop klikken...")
         checkout_btn.first.click()
 
-        page.wait_for_timeout(3000)
+        try:
+            page.wait_for_load_state("load", timeout=10000)
+        except Exception:
+            pass
+        page.wait_for_timeout(2000)
 
         current_url = page.url
         logger.info("URL na afrekenen: %s", current_url)
@@ -552,7 +569,10 @@ class PadelBooker:
 
         # Meetandplay gebruikt Livewire: de winkelwagenpagina laadt op dezelfde URL.
         # Controleer of de breadcrumb of paginatitel "Winkelwagen" toont.
-        page_html = page.content()
+        try:
+            page_html = page.content()
+        except Exception:
+            page_html = ""
         on_cart = (
             "winkelwagen" in current_url.lower()
             or "Winkelwagen" in page_html
@@ -642,14 +662,15 @@ class PadelBooker:
         logger.info("KNLTB Padel Booking Script gestart")
         logger.info("=" * 60)
 
-        booking_date = self._get_next_booking_date()
+        booking_dates = self._get_upcoming_booking_dates(count=3)
         logger.info(
-            "Doeldatum: %s (%s %s–%s)",
-            booking_date.strftime("%d-%m-%Y"),
+            "Zoeken naar tijdsloten voor de komende 3 %s-avonden (%s–%s):",
             self.config["booking"]["day"],
             self.config["booking"]["time_start"],
             self.config["booking"]["time_end"],
         )
+        for d in booking_dates:
+            logger.info("  - %s", d.strftime("%d-%m-%Y"))
 
         browser = None
         context = None
@@ -670,21 +691,24 @@ class PadelBooker:
                     notify_no_courts_available()
                     return False
 
-                # Stap 2: probeer per club een tijdslot te vinden en te boeken
-                for club in clubs:
-                    slot_info = self._find_timeslot(page, club)
-                    if slot_info:
-                        success = self._book_timeslot(page, slot_info)
-                        if success:
-                            return True
-                        # Tijdslot gevonden maar boeking mislukt: ga door naar volgende club
-                        logger.warning(
-                            "Boeking mislukt bij %s, volgende club proberen...",
-                            club["name"]
-                        )
+                # Stap 2: probeer per datum en per club een tijdslot te vinden en te boeken
+                for booking_date in booking_dates:
+                    date_str = booking_date.strftime("%d-%m-%Y")
+                    logger.info("Probeer datum: %s", date_str)
+                    for club in clubs:
+                        slot_info = self._find_timeslot(page, club, booking_date=booking_date)
+                        if slot_info:
+                            success = self._book_timeslot(page, slot_info)
+                            if success:
+                                return True
+                            logger.warning(
+                                "Boeking mislukt bij %s op %s, volgende club proberen...",
+                                club["name"], date_str,
+                            )
 
                 logger.warning(
-                    "Geen beschikbaar tijdslot gevonden bij alle %d club(s)", len(clubs)
+                    "Geen beschikbaar tijdslot gevonden voor alle %d datum(s) bij alle %d club(s)",
+                    len(booking_dates), len(clubs),
                 )
                 notify_no_courts_available()
                 return False
