@@ -1,11 +1,13 @@
 name: "KNLTB Padel Booking"
-version: "1.0.2"
+version: "1.0.3"
 slug: "knltb_padel_booking"
 description: "Automatisch padelbanen boeken op meetandplay.nl"
 arch:
   - aarch64
   - amd64
 init: false
+hassio_api: true
+homeassistant_api: true
 map:
   - config:rw
 options: {}
