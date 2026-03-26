@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium --with-deps
 
 COPY booking.py notify.py session.py config.yaml ./
-COPY knltb_padel_booking/run.sh /run.sh
+COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
 CMD ["/run.sh"]

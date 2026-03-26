@@ -1,12 +1,14 @@
-name: "KNLTB Padel Booking"
-version: "1.0.0"
-slug: "knltb_padel_booking"
-description: "Automatisch padelbanen boeken op meetandplay.nl"
-arch:
-  - aarch64
-  - amd64
-init: false
-map:
-  - config:rw
-options: {}
-schema: {}
+location:
+  city: Boskoop
+  radius_km: 20
+
+booking:
+  day: thursday
+  time_start: "19:30"
+  time_end: "21:00"
+  duration_minutes: 90  # 60 of 90 minuten
+  court_type: indoor  # indoor of outdoor
+  game_type: double   # double = 4 spelers
+
+session:
+  cookies_file: .session_cookies.json
