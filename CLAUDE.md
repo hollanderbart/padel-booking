@@ -29,6 +29,7 @@ Gebruik [semantic versioning](https://semver.org/):
 6. In HA: **Settings → Add-ons → KNLTB Padel Booking → ⋮ → Check for updates → Update**
 
 > **Claude**: commit en push altijd automatisch na een aanpassing. Vraag hier niet om toestemming voor.
+> **Claude**: werk altijd direct op de `main` branch. Maak geen feature branches. Push altijd naar `origin/main`.
 
 ## README bijhouden
 
