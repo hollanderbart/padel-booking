@@ -1,81 +1,84 @@
 """
 Notificatie systeem voor het booking script.
-Ondersteunt macOS notificaties.
+Ondersteunt HA mobile app push notificaties en macOS notificaties.
 """
 
+import os
 import subprocess
 import platform
-from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
+try:
+    import requests as _requests
+    _HAS_REQUESTS = True
+except ImportError:
+    _HAS_REQUESTS = False
 
 
 class Notifier:
     """Beheer notificaties voor verschillende platformen."""
 
     def __init__(self):
-        """Initialiseer de notifier."""
         self.platform = platform.system()
 
     def send(self, title: str, message: str, sound: bool = True) -> None:
-        """
-        Verstuur een notificatie.
+        # Probeer altijd eerst HA mobile push als SUPERVISOR_TOKEN aanwezig is
+        if os.environ.get("SUPERVISOR_TOKEN"):
+            self._send_ha_push(title, message)
+            return
 
-        Args:
-            title: Titel van de notificatie
-            message: Bericht van de notificatie
-            sound: Of er een geluid moet worden afgespeeld
-        """
-        if self.platform == "Darwin":  # macOS
+        if self.platform == "Darwin":
             self._send_macos(title, message, sound)
         else:
-            # Fallback: print naar console
+            self._send_console(title, message)
+
+    def _send_ha_push(self, title: str, message: str) -> None:
+        if not _HAS_REQUESTS:
+            logger.warning("requests niet beschikbaar — kan geen HA push sturen")
+            self._send_console(title, message)
+            return
+
+        token = os.environ["SUPERVISOR_TOKEN"]
+        device_id = os.environ.get("HA_NOTIFY_DEVICE_ID", "").strip()
+        base_url = "http://supervisor/core/api"
+
+        if device_id:
+            service_url = f"{base_url}/services/notify/mobile_app_{device_id}"
+        else:
+            service_url = f"{base_url}/services/notify/notify"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"title": title, "message": message}
+
+        try:
+            resp = _requests.post(service_url, json=payload, headers=headers, timeout=10)
+            resp.raise_for_status()
+            logger.info("HA push notificatie verzonden: %s", title)
+        except Exception as e:
+            logger.warning("HA push notificatie mislukt: %s — fallback naar console", e)
             self._send_console(title, message)
 
     def _send_macos(self, title: str, message: str, sound: bool = True) -> None:
-        """
-        Verstuur een macOS notificatie via osascript.
-
-        Args:
-            title: Titel van de notificatie
-            message: Bericht van de notificatie
-            sound: Of er een geluid moet worden afgespeeld
-        """
         try:
-            # Escape quotes in title en message
             title = title.replace('"', '\\"')
             message = message.replace('"', '\\"')
-
             sound_part = ' sound name "default"' if sound else ''
-
-            script = f'''
-            display notification "{message}" with title "{title}"{sound_part}
-            '''
-
-            subprocess.run(
-                ['osascript', '-e', script],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            print(f"✓ Notificatie verzonden: {title}")
-
-        except subprocess.CalledProcessError as e:
-            print(f"⚠️  Fout bij verzenden van macOS notificatie: {e}")
-            self._send_console(title, message)
+            script = f'display notification "{message}" with title "{title}"{sound_part}'
+            subprocess.run(['osascript', '-e', script], check=True, capture_output=True, text=True)
+            logger.info("macOS notificatie verzonden: %s", title)
         except Exception as e:
-            print(f"⚠️  Onverwachte fout bij notificatie: {e}")
+            logger.warning("macOS notificatie mislukt: %s", e)
             self._send_console(title, message)
 
     def _send_console(self, title: str, message: str) -> None:
-        """
-        Print de notificatie naar de console als fallback.
-
-        Args:
-            title: Titel van de notificatie
-            message: Bericht van de notificatie
-        """
         separator = "=" * 60
         print(f"\n{separator}")
-        print(f"📢 {title}")
+        print(f"{title}")
         print(f"{separator}")
         print(message)
         print(f"{separator}\n")
