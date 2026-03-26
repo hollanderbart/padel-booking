@@ -174,6 +174,7 @@ class PadelBooker:
             "club_address": slot_info.get("club_address", ""),
             "court_name": slot_info.get("court_name", ""),
             "time_range": slot_info.get("time_range", ""),
+            "payment_url": slot_info.get("payment_url", ""),
         }
         try:
             if self.history_file.exists():
@@ -686,6 +687,9 @@ class PadelBooker:
             page.wait_for_timeout(3000)
             current_url = page.url
             logger.info("URL na betaalknop: %s", current_url)
+
+        # Sla payment URL op in slot_info zodat history hem kan bewaren
+        slot_info["payment_url"] = current_url
 
         # Succes: notificeer en houd browser open
         notify_booking_available(
