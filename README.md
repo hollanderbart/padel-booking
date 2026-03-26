@@ -1,226 +1,191 @@
-# KNLTB Padel Booking Automatisering
+# KNLTB Padel Booking
 
-Automatisch padelbanen boeken op het KNLTB Meet & Play platform (meetandplay.nl).
+Automatiseert het boeken van padelbanen op [meetandplay.nl](https://www.meetandplay.nl). Het script zoekt elke nacht naar beschikbare binnenbanen in een opgegeven regio en tijdvenster, voegt het eerste beschikbare tijdslot toe aan de winkelwagen en stuurt een push notificatie met een directe link naar de betalingspagina.
 
-## Functionaliteit
+## Hoe het werkt
 
-Dit script automatiseert het boeken van padelbanen met de volgende kenmerken:
-- **Sport**: Padel, dubbel (4 spelers)
-- **Baantype**: Binnenbaan (configureerbaar)
-- **Regio**: Boskoop, straal 20km (configureerbaar)
-- **Dag**: Elke donderdagavond (configureerbaar)
-- **Tijdslot**: 19:00-21:30 (configureerbaar)
+1. Logt automatisch in via KNLTB ID SSO
+2. Zoekt beschikbare clubs in de regio op de komende 4 weken (configureerbare dag)
+3. Filtert op binnenbaan, avond, gewenste duur en speltype
+4. Boekt het eerste beschikbare tijdslot en navigeert naar de betalingspagina
+5. Stuurt een push notificatie naar de HA mobiele app met een link om de betaling af te ronden
 
-Het script gebruikt Playwright voor browser-automatisering en hergebruikt sessies via cookies, zodat je niet elke keer opnieuw hoeft in te loggen.
+De betaling zelf doe je handmatig via de link in de notificatie. Er worden alleen notificaties gestuurd bij een succesvolle boeking.
 
-## Installatie
+---
 
-### 1. Vereisten
+## Installatie als Home Assistant addon
 
-- Python 3.8 of hoger
-- pip (Python package manager)
+### Vereisten
 
-### 2. Installeer dependencies
+- Home Assistant OS of Supervised
+- [HA Companion app](https://companion.home-assistant.io/) op je telefoon voor push notificaties
+- KNLTB account op meetandplay.nl
 
-```bash
-# Installeer Python packages
-pip install -r requirements.txt
+### Stap 1 — Voeg de custom repository toe
 
-# Installeer Playwright browsers
-playwright install chromium
+1. Ga naar **Settings → Add-ons → Add-on store**
+2. Klik op **⋮ (drie puntjes) → Repositories**
+3. Voeg toe: `https://github.com/hollanderbart/knltb-padel-booking`
+4. Sluit het venster en ververs de pagina
+5. De addon **KNLTB Padel Booking** verschijnt onderaan de store
+
+### Stap 2 — Installeer de addon
+
+Klik op **KNLTB Padel Booking → Install**. De installatie duurt even omdat Playwright en Chromium worden gedownload (~500 MB).
+
+### Stap 3 — Maak de credentials aan
+
+Maak via de **File Editor** addon of Samba het bestand `/config/knltb/.env` aan:
+
 ```
-
-### 3. Configuratie
-
-#### Environment variables (optioneel)
-
-Maak een `.env` bestand aan in de projectmap voor eventuele credentials:
-
-```bash
-# .env
 KNLTB_EMAIL=jouw@email.nl
 KNLTB_PASSWORD=jouwwachtwoord
+HA_NOTIFY_DEVICE_ID=iphone_van_bart_2
 ```
 
-**Let op**: Het `.env` bestand staat in de `.gitignore` en wordt niet gecommit naar git.
+**`HA_NOTIFY_DEVICE_ID`** vind je via:
+**Developer Tools → Actions → zoek op `notify.mobile_app`**
 
-#### Config bestand
+De naam van de service is bijv. `notify.mobile_app_iphone_van_bart_2` → device ID is `iphone_van_bart_2`.
 
-Pas `config.yaml` aan naar jouw voorkeuren:
+### Stap 4 — Pas de booking configuratie aan (optioneel)
+
+Standaard zoekt het script op donderdag tussen 19:30–21:00 in Boskoop (straal 20 km). Om dit aan te passen, maak je `/config/knltb/config.yaml` aan:
 
 ```yaml
 location:
-  city: Boskoop           # Jouw stad
-  radius_km: 20           # Zoekradius in kilometers
+  city: Boskoop
+  radius_km: 20
 
 booking:
-  day: thursday           # Dag van de week (monday t/m sunday)
-  time_start: "19:00"     # Start tijd
-  time_end: "21:30"       # Eind tijd
-  court_type: indoor      # indoor of outdoor
-  game_type: double       # double = 4 spelers
+  day: thursday          # maandag t/m zondag (Engels of Nederlands)
+  time_start: "19:30"
+  time_end: "21:00"
+  duration_minutes: 90   # 60 of 90
+  court_type: indoor     # indoor of outdoor
+  game_type: double      # double (4 spelers) of single (2 spelers)
 
 session:
-  cookies_file: .session_cookies.json  # Locatie voor opgeslagen sessie
+  cookies_file: .session_cookies.json
 ```
 
-## Gebruik
+### Stap 5 — Test handmatig
 
-### Eerste keer uitvoeren
+Ga naar **Settings → Add-ons → KNLTB Padel Booking → Start** en bekijk de **Log** tab. Een succesvolle run ziet er zo uit:
 
-Bij de eerste keer draaien, of als je sessie is verlopen, zal het script een browser openen waarin je handmatig moet inloggen:
-
-```bash
-python booking.py --headed
+```
+INFO  Automatisch inloggen gelukt!
+INFO  8 club(s) gevonden na filteren
+INFO  Tijdslot gevonden: Sportcentrum Boskoop om 19:30 (baan: Padelbaan 1)
+INFO  Winkelwagen bereikt
+INFO  HA push notificatie verzonden: Padelbaan geboekt!
 ```
 
-Volg de instructies in de terminal:
-1. Log in op Meet & Play in de browser die wordt geopend
-2. Wacht tot de homepage volledig is geladen
-3. Druk op ENTER in de terminal
+### Stap 6 — Automatisering instellen
 
-Het script slaat je sessie op en zal deze hergebruiken bij volgende runs.
+Voeg een automation toe via **Settings → Automations → + Create automation**:
 
-### Normale uitvoering
+- **Trigger**: Time → `00:00:30`
+- **Action**: Call service → `hassio.addon_start` → `addon: local_knltb_padel_booking`
 
-Na de eerste login kun je het script in headless mode draaien:
-
-```bash
-python booking.py
-```
-
-Het script zal:
-1. Je opgeslagen sessie hergebruiken
-2. Zoeken naar beschikbare padelbanen
-3. De eerste beschikbare binnenbaan selecteren
-4. Tot aan de betalingspagina gaan
-5. Stoppen en een notificatie sturen
-
-**Let op**: Het script stopt bij de betalingspagina. Je moet zelf de betaling afronden!
-
-### Automatisch uitvoeren via Home Assistant
-
-Het script kan elke nacht om 00:01 automatisch worden gestart vanuit Home Assistant via `run_booking.sh`.
-
-#### 1. Shell script uitvoerbaar maken
-
-```bash
-chmod +x run_booking.sh
-```
-
-Het script:
-- Activeert de Python virtual environment
-- Draait `booking.py` en logt output naar `booking.log`
-- Geeft exit code terug: `0` = boeking geslaagd, `1` = geen slot gevonden, `130` = onderbroken
-
-#### 2. Home Assistant configuratie
-
-Voeg het volgende toe aan `configuration.yaml` (pas het pad aan naar de locatie op je HA host):
+Of voeg dit toe aan `automations.yaml`:
 
 ```yaml
-shell_command:
-  run_padel_booking: "/bin/bash /pad/naar/knltb-padel-booking/run_booking.sh"
-```
-
-#### 3. Home Assistant automation
-
-Voeg toe aan `automations.yaml` of maak aan via de UI:
-
-```yaml
-- alias: "Padel booking — dagelijkse run 00:01"
+- alias: "Padel booking — dagelijkse run"
   trigger:
     - platform: time
-      at: "00:01:00"
+      at: "00:00:30"
   action:
-    - service: shell_command.run_padel_booking
+    - service: hassio.addon_start
+      data:
+        addon: local_knltb_padel_booking
 ```
 
-#### 4. Log bekijken
+---
+
+## Push notificaties
+
+Bij een succesvolle boeking ontvang je een push notificatie met:
+- Baannaam
+- Tijdstip
+- Clubnaam en adres
+- Een directe link naar de betalingspagina (tik op de notificatie om te openen)
+
+Er worden **geen** notificaties gestuurd als er geen baan gevonden wordt.
+
+---
+
+## Lokaal testen (zonder HA)
 
 ```bash
-tail -f booking.log
-```
+# Vereisten installeren
+pip install -r requirements.txt
+playwright install chromium --with-deps
 
-## Notificaties
+# .env aanmaken
+cp knltb_padel_booking/.env.example .env
+# Vul KNLTB_EMAIL en KNLTB_PASSWORD in
 
-Het script verstuurt macOS notificaties voor de volgende gebeurtenissen:
-- ✅ **Baan gevonden**: Er is een baan beschikbaar en het script staat klaar op de betalingspagina
-- ⚠️ **Geen banen**: Er zijn geen banen beschikbaar
-- ❌ **Fout**: Er is een fout opgetreden tijdens het boeken
-- 🔐 **Sessie verlopen**: Je moet opnieuw inloggen
+# Uitvoeren (headless)
+python booking.py
 
-## Sessie management
-
-Het script slaat cookies op in `.session_cookies.json`. Dit bestand:
-- Staat in `.gitignore` en wordt niet gecommit
-- Bevat je login sessie
-- Wordt automatisch vernieuwd als de sessie verloopt
-
-### Sessie verwijderen
-
-Als je opnieuw wilt inloggen of problemen hebt met de sessie:
-
-```bash
-rm .session_cookies.json
+# Met zichtbare browser (voor debugging)
 python booking.py --headed
+
+# Met debug logging
+python booking.py --debug
 ```
+
+### Via Docker
+
+```bash
+docker build -f knltb_padel_booking/Dockerfile -t knltb-test .
+docker run --rm -v $(pwd)/.env:/app/.env knltb-test
+```
+
+---
 
 ## Troubleshooting
 
-### "Sessie verlopen" melding
+### Login mislukt
 
-Als je vaak de melding krijgt dat je sessie is verlopen:
-1. Verwijder het cookies bestand: `rm .session_cookies.json`
-2. Run het script opnieuw met `--headed`
-3. Log handmatig in
+Als het script niet kan inloggen:
+1. Controleer `KNLTB_EMAIL` en `KNLTB_PASSWORD` in `/config/knltb/.env`
+2. Bekijk de debug screenshot via **File Editor**: `/config/knltb/debug_login_failed.png`
 
 ### Script vindt geen banen
 
-Dit kan verschillende oorzaken hebben:
-- Er zijn echt geen banen beschikbaar in jouw regio/tijdslot
-- De selectors in het script zijn verouderd (Meet & Play heeft hun website aangepast)
-- Je zoekparameters zijn te specifiek
+- Er zijn geen banen beschikbaar in het opgegeven tijdvenster
+- Verbreed het tijdvenster (`time_start`/`time_end`) of vergroot `radius_km` in de config
 
-### Script crasht of geeft errors
+### Push notificaties komen niet aan
 
-1. Check of Playwright goed is geïnstalleerd: `playwright install chromium`
-2. Check of alle dependencies zijn geïnstalleerd: `pip install -r requirements.txt`
-3. Run in headed mode om te zien wat er gebeurt: `python booking.py --headed`
+- Controleer `HA_NOTIFY_DEVICE_ID` in `/config/knltb/.env`
+- Zoek de juiste device ID via **Developer Tools → Actions → `notify.mobile_app`**
 
-## Structuur
+---
+
+## Bestandsstructuur
 
 ```
 knltb-padel-booking/
-├── README.md              # Deze documentatie
-├── requirements.txt       # Python dependencies
-├── config.yaml           # Configuratie (locatie, tijd, etc.)
-├── .env                  # Environment variables (optioneel, niet in git)
-├── .gitignore           # Git ignore regels
-├── booking.py           # Hoofdscript
-├── session.py           # Cookie/session management
-├── notify.py            # Notificatie systeem
-├── run_booking.sh        # Shell script voor Home Assistant scheduling
-├── conftest.py          # pytest configuratie (--headed optie)
-├── test_integration.py  # End-to-end integratietest
-└── .session_cookies.json # Opgeslagen sessie (niet in git)
+├── README.md
+├── CLAUDE.md                        # ontwikkelrichtlijnen
+├── repository.yaml                  # HA custom repository manifest
+├── knltb_padel_booking/             # HA addon
+│   ├── config.yaml                  # addon manifest + versienummer
+│   ├── Dockerfile
+│   ├── run.sh                       # entrypoint
+│   ├── booking.py
+│   ├── notify.py
+│   ├── session.py
+│   ├── requirements.txt
+│   ├── booking_config.yaml          # standaard booking configuratie
+│   └── .env.example                 # voorbeeld .env
+├── booking.py                       # hoofdscript
+├── notify.py                        # notificaties
+├── session.py                       # sessiebeheer
+├── config.yaml                      # booking configuratie
+└── requirements.txt
 ```
-
-## Belangrijke notities
-
-⚠️ **Dit script dient als startpunt en moet mogelijk worden aangepast**:
-- De selectors in `booking.py` zijn placeholders en moeten worden aangepast op basis van de daadwerkelijke structuur van meetandplay.nl
-- Test het script altijd eerst handmatig met `--headed` mode
-- Het script stopt bij de betalingspagina - je moet zelf betalen
-
-⚠️ **Gebruik op eigen risico**:
-- Dit is een automatiseringsscript voor persoonlijk gebruik
-- Controleer altijd de boeking voordat je betaalt
-- Het script maakt gebruik van browser-automatisering, wat tegen de Terms of Service van bepaalde websites kan zijn
-
-## Licentie
-
-Voor persoonlijk gebruik.
-
-## Support
-
-Voor vragen of problemen, open een issue in de repository.
