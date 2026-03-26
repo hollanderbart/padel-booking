@@ -58,6 +58,8 @@ Ga naar **Settings → Add-ons → KNLTB Padel Booking → Configuration** en vu
 
 De naam van de service is bijv. `notify.mobile_app_mijn_telefoon` → device ID is `mijn_telefoon`.
 
+> **Let op:** de waarden die je hier invult worden door HA opgeslagen in `/data/options.json`. Bij elke addon-start leest het script dit bestand uit. Een eerder aangemaakt `/config/knltb/.env` wordt **niet meer gebruikt** en kan worden verwijderd.
+
 ### Stap 4 — Test handmatig
 
 Ga naar **Settings → Add-ons → KNLTB Padel Booking → Start** en bekijk de **Log** tab. Een succesvolle run ziet er zo uit:
