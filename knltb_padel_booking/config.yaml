@@ -1,5 +1,5 @@
 name: "KNLTB Padel Booking"
-version: "1.1.3"
+version: "1.1.4"
 slug: "knltb_padel_booking"
 description: "Automatisch padelbanen boeken op meetandplay.nl"
 arch:
@@ -26,7 +26,7 @@ options:
 
 schema:
   knltb_email: str
-  knltb_password: str
+  knltb_password: password
   ha_notify_device_id: str?
   location_city: str
   location_radius_km: int
