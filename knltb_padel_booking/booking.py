@@ -615,6 +615,7 @@ class PadelBooker:
             slot_info["court_name"],
             slot_info["time_range"],
             f"{slot_info['club_name']} — {slot_info['club_address']}",
+            current_url,
         )
         print("\n" + "=" * 60)
         print("BOEKING GESLAAGD — WINKELWAGEN BEREIKT")
@@ -646,9 +647,9 @@ class PadelBooker:
         logger.info("KNLTB Padel Booking Script gestart")
         logger.info("=" * 60)
 
-        booking_dates = self._get_upcoming_booking_dates(count=3)
+        booking_dates = self._get_upcoming_booking_dates(count=4)
         logger.info(
-            "Zoeken naar tijdsloten voor de komende 3 %s-avonden (%s–%s):",
+            "Zoeken naar tijdsloten voor de komende 4 %s-avonden (%s–%s):",
             self.config["booking"]["day"],
             self.config["booking"]["time_start"],
             self.config["booking"]["time_end"],
