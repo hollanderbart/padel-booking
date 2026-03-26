@@ -23,10 +23,10 @@ class Notifier:
     def __init__(self):
         self.platform = platform.system()
 
-    def send(self, title: str, message: str, sound: bool = True) -> None:
+    def send(self, title: str, message: str, sound: bool = True, url: str = "") -> None:
         # Probeer altijd eerst HA mobile push als SUPERVISOR_TOKEN aanwezig is
         if os.environ.get("SUPERVISOR_TOKEN"):
-            self._send_ha_push(title, message)
+            self._send_ha_push(title, message, url)
             return
 
         if self.platform == "Darwin":
@@ -34,7 +34,7 @@ class Notifier:
         else:
             self._send_console(title, message)
 
-    def _send_ha_push(self, title: str, message: str) -> None:
+    def _send_ha_push(self, title: str, message: str, url: str = "") -> None:
         if not _HAS_REQUESTS:
             logger.warning("requests niet beschikbaar — kan geen HA push sturen")
             self._send_console(title, message)
@@ -54,6 +54,8 @@ class Notifier:
             "Content-Type": "application/json",
         }
         payload = {"title": title, "message": message}
+        if url:
+            payload["data"] = {"url": url}
 
         try:
             resp = _requests.post(service_url, json=payload, headers=headers, timeout=10)
@@ -84,21 +86,12 @@ class Notifier:
         print(f"{separator}\n")
 
 
-def notify_booking_available(court_name: str, time: str, location: str) -> None:
-    """
-    Verstuur notificatie dat er een baan beschikbaar is.
-
-    Args:
-        court_name: Naam van de baan
-        time: Tijdstip van de boeking
-        location: Locatie van de baan
-    """
+def notify_booking_available(court_name: str, time: str, location: str, payment_url: str = "") -> None:
     notifier = Notifier()
-    notifier.send(
-        title="Padelbaan gevonden!",
-        message=f"Baan beschikbaar: {court_name}\nTijd: {time}\nLocatie: {location}\n\nGa naar de betalingspagina om te bevestigen.",
-        sound=True
-    )
+    message = f"{court_name}\n{time}\n{location}"
+    if payment_url:
+        message += f"\n\n{payment_url}"
+    notifier.send(title="Padelbaan geboekt!", message=message, sound=True, url=payment_url)
 
 
 def notify_no_courts_available() -> None:
