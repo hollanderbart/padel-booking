@@ -1,5 +1,5 @@
 name: "KNLTB Padel Booking"
-version: "1.1.7"
+version: "1.1.8"
 slug: "knltb_padel_booking"
 description: "Automatisch padelbanen boeken op meetandplay.nl"
 arch:
