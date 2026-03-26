@@ -25,8 +25,10 @@ Gebruik [semantic versioning](https://semver.org/):
 2. Sync gewijzigde bestanden naar `knltb_padel_booking/` als ze daar ook in staan
 3. Verhoog het versienummer in `knltb_padel_booking/config.yaml`
 4. **Update `README.md`** als de wijziging de installatie, configuratie, gebruik of gedrag van notificaties beïnvloedt (zie sectie hieronder)
-5. Commit en push naar `main`
+5. Commit en push naar `main` — **doe dit altijd zonder te vragen**
 6. In HA: **Settings → Add-ons → KNLTB Padel Booking → ⋮ → Check for updates → Update**
+
+> **Claude**: commit en push altijd automatisch na een aanpassing. Vraag hier niet om toestemming voor.
 
 ## README bijhouden
 
