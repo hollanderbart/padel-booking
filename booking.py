@@ -34,12 +34,7 @@ from playwright.sync_api import (
 )
 
 from session import SessionManager
-from notify import (
-    notify_booking_available,
-    notify_no_courts_available,
-    notify_booking_error,
-    notify_session_expired,
-)
+from notify import notify_booking_available
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -201,7 +196,6 @@ class PadelBooker:
             return context
 
         # Sessie verlopen
-        notify_session_expired()
         context.close()
 
         email = os.getenv("KNLTB_EMAIL", "").strip()
@@ -678,7 +672,6 @@ class PadelBooker:
                 clubs = self._search_clubs(page)
                 if not clubs:
                     logger.warning("Geen clubs gevonden met de opgegeven filters")
-                    notify_no_courts_available()
                     return False
 
                 # Stap 2: probeer per datum en per club een tijdslot te vinden en te boeken
@@ -700,13 +693,11 @@ class PadelBooker:
                     "Geen beschikbaar tijdslot gevonden voor alle %d datum(s) bij alle %d club(s)",
                     len(booking_dates), len(clubs),
                 )
-                notify_no_courts_available()
                 return False
 
             except Exception as e:
                 error_msg = f"Onverwachte fout: {e}"
                 logger.exception(error_msg)
-                notify_booking_error(error_msg)
                 return False
 
             finally:
