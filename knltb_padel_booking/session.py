@@ -255,9 +255,13 @@ class SessionManager:
                         )
                 else:
                     logger.warning(
-                        "Geen SSO-link en geen wachtwoordveld gevonden. "
-                        "Handmatige login vereist."
+                        "Geen SSO-link en geen wachtwoordveld gevonden op %s", page.url
                     )
+                    try:
+                        page.screenshot(path="/config/knltb/debug_login.png", full_page=True)
+                        logger.info("Debug screenshot opgeslagen: /config/knltb/debug_login.png")
+                    except Exception:
+                        pass
 
             # Controleer of login gelukt is
             login_ok = self.is_logged_in(page)
@@ -272,9 +276,12 @@ class SessionManager:
             self.save_cookies(context)
             return context, True
 
-        logger.warning("Automatisch inloggen mislukt (bot-detectie of 2FA vereist).")
-        logger.warning("Browser blijft open zodat je de fout kunt bekijken.")
-        _wait_for_user(page, "Druk op ENTER om door te gaan... ")
+        logger.warning("Automatisch inloggen mislukt.")
+        try:
+            page.screenshot(path="/config/knltb/debug_login_failed.png", full_page=True)
+            logger.info("Debug screenshot opgeslagen: /config/knltb/debug_login_failed.png")
+        except Exception:
+            pass
         page.close()
         context.close()
         return None, False

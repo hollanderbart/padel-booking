@@ -212,25 +212,15 @@ class PadelBooker:
             new_context, success = self.session_manager.auto_login(browser, email, password)
             if success:
                 return new_context
+            logger.error("Automatisch inloggen mislukt — script stopt (geen X server beschikbaar in Docker)")
+            raise RuntimeError(
+                "Automatisch inloggen mislukt. Controleer KNLTB_EMAIL/KNLTB_PASSWORD in /config/knltb/.env"
+            )
 
-            # Auto-login mislukt (bot-detectie / 2FA): val terug op handmatige login
-            logger.info("Automatisch inloggen mislukt — handmatige login via headed browser")
-
-        # Geen credentials of auto-login mislukt: handmatige login in headed browser
-        if not email and not password:
-            logger.info("Geen KNLTB_EMAIL/KNLTB_PASSWORD in omgeving — handmatige login")
-
-        headed_browser = self._playwright.chromium.launch(headless=False)
-        new_context = self.session_manager.manual_login(headed_browser)
-        # Kopieer cookies naar de primaire (headless) context
-        cookies = new_context.cookies()
-        headed_browser.close()
-        fresh_context = browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent=USER_AGENT,
+        logger.error("Geen KNLTB_EMAIL/KNLTB_PASSWORD in omgeving — script stopt")
+        raise RuntimeError(
+            "Geen credentials gevonden. Voeg KNLTB_EMAIL en KNLTB_PASSWORD toe aan /config/knltb/.env"
         )
-        fresh_context.add_cookies(cookies)
-        return fresh_context
 
     # ------------------------------------------------------------------
     # Zoeken naar clubs
