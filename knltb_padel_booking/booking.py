@@ -647,9 +647,11 @@ class PadelBooker:
         logger.info("KNLTB Padel Booking Script gestart")
         logger.info("=" * 60)
 
-        booking_dates = self._get_upcoming_booking_dates(count=4)
+        weeks_ahead = self.config["booking"].get("weeks_ahead", 4)
+        booking_dates = self._get_upcoming_booking_dates(count=weeks_ahead)
         logger.info(
-            "Zoeken naar tijdsloten voor de komende 4 %s-avonden (%s–%s):",
+            "Zoeken naar tijdsloten voor de komende %d %s-avonden (%s–%s):",
+            weeks_ahead,
             self.config["booking"]["day"],
             self.config["booking"]["time_start"],
             self.config["booking"]["time_end"],

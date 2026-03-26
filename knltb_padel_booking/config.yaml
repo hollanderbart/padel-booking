@@ -1,5 +1,5 @@
 name: "KNLTB Padel Booking"
-version: "1.0.7"
+version: "1.1.0"
 slug: "knltb_padel_booking"
 description: "Automatisch padelbanen boeken op meetandplay.nl"
 arch:
@@ -10,5 +10,30 @@ hassio_api: true
 homeassistant_api: true
 map:
   - config:rw
-options: {}
-schema: {}
+options:
+  knltb_email: ""
+  knltb_password: ""
+  ha_notify_device_id: ""
+  location_city: "Boskoop"
+  location_radius_km: 20
+  booking_day: "thursday"
+  booking_time_start: "19:30"
+  booking_time_end: "21:00"
+  duration_minutes: 90
+  court_type: "indoor"
+  game_type: "double"
+  weeks_ahead: 4
+
+schema:
+  knltb_email: email
+  knltb_password: password
+  ha_notify_device_id: str?
+  location_city: str
+  location_radius_km: int
+  booking_day: list(monday|tuesday|wednesday|thursday|friday|saturday|sunday)
+  booking_time_start: match([0-2][0-9]:[0-5][0-9])
+  booking_time_end: match([0-2][0-9]:[0-5][0-9])
+  duration_minutes: list(60|90)
+  court_type: list(indoor|outdoor)
+  game_type: list(double|single)
+  weeks_ahead: int

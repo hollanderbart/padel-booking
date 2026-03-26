@@ -34,43 +34,31 @@ De betaling zelf doe je handmatig via de link in de notificatie. Er worden allee
 
 Klik op **KNLTB Padel Booking → Install**. De installatie duurt even omdat Playwright en Chromium worden gedownload (~500 MB).
 
-### Stap 3 — Maak de credentials aan
+### Stap 3 — Configureer de addon
 
-Maak via de **File Editor** addon of Samba het bestand `/config/knltb/.env` aan:
+Ga naar **Settings → Add-ons → KNLTB Padel Booking → Configuration** en vul in:
 
-```
-KNLTB_EMAIL=jouw@email.nl
-KNLTB_PASSWORD=jouwwachtwoord
-HA_NOTIFY_DEVICE_ID=iphone_van_bart_2
-```
+| Veld | Beschrijving |
+|---|---|
+| `knltb_email` | E-mailadres van je KNLTB account |
+| `knltb_password` | Wachtwoord van je KNLTB account |
+| `ha_notify_device_id` | Device ID voor push notificaties (optioneel) |
+| `location_city` | Stad om clubs in te zoeken (bijv. `Boskoop`) |
+| `location_radius_km` | Zoekradius in kilometers |
+| `booking_day` | Dag van de week om te boeken |
+| `booking_time_start` | Vroegste starttijd (bijv. `19:30`) |
+| `booking_time_end` | Laatste starttijd (bijv. `21:00`) |
+| `duration_minutes` | Duur van de boeking: `60` of `90` minuten |
+| `court_type` | Baantype: `indoor` of `outdoor` |
+| `game_type` | Speltype: `double` (4 spelers) of `single` (2 spelers) |
+| `weeks_ahead` | Aantal weken vooruit zoeken |
 
-**`HA_NOTIFY_DEVICE_ID`** vind je via:
+**`ha_notify_device_id`** vind je via:
 **Developer Tools → Actions → zoek op `notify.mobile_app`**
 
 De naam van de service is bijv. `notify.mobile_app_iphone_van_bart_2` → device ID is `iphone_van_bart_2`.
 
-### Stap 4 — Pas de booking configuratie aan (optioneel)
-
-Standaard zoekt het script op donderdag tussen 19:30–21:00 in Boskoop (straal 20 km). Om dit aan te passen, maak je `/config/knltb/config.yaml` aan:
-
-```yaml
-location:
-  city: Boskoop
-  radius_km: 20
-
-booking:
-  day: thursday          # maandag t/m zondag (Engels of Nederlands)
-  time_start: "19:30"
-  time_end: "21:00"
-  duration_minutes: 90   # 60 of 90
-  court_type: indoor     # indoor of outdoor
-  game_type: double      # double (4 spelers) of single (2 spelers)
-
-session:
-  cookies_file: .session_cookies.json
-```
-
-### Stap 5 — Test handmatig
+### Stap 4 — Test handmatig
 
 Ga naar **Settings → Add-ons → KNLTB Padel Booking → Start** en bekijk de **Log** tab. Een succesvolle run ziet er zo uit:
 
@@ -151,17 +139,17 @@ docker run --rm -v $(pwd)/.env:/app/.env knltb-test
 ### Login mislukt
 
 Als het script niet kan inloggen:
-1. Controleer `KNLTB_EMAIL` en `KNLTB_PASSWORD` in `/config/knltb/.env`
+1. Controleer `knltb_email` en `knltb_password` in de Configuration tab van de addon
 2. Bekijk de debug screenshot via **File Editor**: `/config/knltb/debug_login_failed.png`
 
 ### Script vindt geen banen
 
 - Er zijn geen banen beschikbaar in het opgegeven tijdvenster
-- Verbreed het tijdvenster (`time_start`/`time_end`) of vergroot `radius_km` in de config
+- Verbreed het tijdvenster (`booking_time_start`/`booking_time_end`) of vergroot `location_radius_km` in de Configuration tab
 
 ### Push notificaties komen niet aan
 
-- Controleer `HA_NOTIFY_DEVICE_ID` in `/config/knltb/.env`
+- Controleer `ha_notify_device_id` in de Configuration tab van de addon
 - Zoek de juiste device ID via **Developer Tools → Actions → `notify.mobile_app`**
 
 ---
@@ -174,15 +162,15 @@ knltb-padel-booking/
 ├── CLAUDE.md                        # ontwikkelrichtlijnen
 ├── repository.yaml                  # HA custom repository manifest
 ├── knltb_padel_booking/             # HA addon
-│   ├── config.yaml                  # addon manifest + versienummer
+│   ├── config.yaml                  # addon manifest + versienummer + options schema
 │   ├── Dockerfile
 │   ├── run.sh                       # entrypoint
+│   ├── options_to_config.py         # converteert /data/options.json naar .env + config.yaml
 │   ├── booking.py
 │   ├── notify.py
 │   ├── session.py
 │   ├── requirements.txt
-│   ├── booking_config.yaml          # standaard booking configuratie
-│   └── .env.example                 # voorbeeld .env
+│   └── booking_config.yaml          # standaard booking configuratie (fallback)
 ├── booking.py                       # hoofdscript
 ├── notify.py                        # notificaties
 ├── session.py                       # sessiebeheer

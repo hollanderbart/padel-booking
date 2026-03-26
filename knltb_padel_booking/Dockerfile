@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium --with-deps
 
-COPY booking.py notify.py session.py ./
+COPY booking.py notify.py session.py options_to_config.py ./
 COPY booking_config.yaml ./config.yaml
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
