@@ -1,5 +1,5 @@
 name: "KNLTB Padel Booking"
-version: "1.1.1"
+version: "1.1.2"
 slug: "knltb_padel_booking"
 description: "Automatisch padelbanen boeken op meetandplay.nl"
 arch:
@@ -19,7 +19,7 @@ options:
   booking_day: "thursday"
   booking_time_start: "19:30"
   booking_time_end: "21:00"
-  duration_minutes: 90
+  duration_minutes: "90"
   court_type: "indoor"
   game_type: "double"
   weeks_ahead: 4
