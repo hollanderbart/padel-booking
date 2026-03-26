@@ -15,6 +15,7 @@ Werking:
   6. Klik door tot aan de betalingspagina en stuur een notificatie.
 """
 
+import json
 import logging
 import os
 import re
@@ -99,6 +100,9 @@ class PadelBooker:
         self.session_manager = SessionManager(
             self.config["session"]["cookies_file"]
         )
+        self.state_file = Path(
+            self.config["session"].get("state_file", ".booking_state.json")
+        )
         self._playwright = None
 
     # ------------------------------------------------------------------
@@ -111,6 +115,53 @@ class PadelBooker:
             raise FileNotFoundError(f"Configuratiebestand niet gevonden: {config_path}")
         with open(config_file, "r") as f:
             return yaml.safe_load(f)
+
+    # ------------------------------------------------------------------
+    # Deduplicatie
+    # ------------------------------------------------------------------
+
+    def _is_already_booked(self) -> bool:
+        if not self.state_file.exists():
+            return False
+        try:
+            with open(self.state_file, "r") as f:
+                state = json.load(f)
+            booked_date = datetime.strptime(state["booked_date"], "%Y-%m-%d").date()
+            today = datetime.now().date()
+            if booked_date >= today:
+                logger.info(
+                    "Al geboekt voor %s — boeking overgeslagen", booked_date.isoformat()
+                )
+                return True
+            logger.info(
+                "Vorige boeking (%s) is verlopen — nieuwe boeking starten",
+                booked_date.isoformat(),
+            )
+            return False
+        except Exception as e:
+            logger.warning("Fout bij lezen booking state: %s — doorgaan met boeken", e)
+            return False
+
+    def _save_booking_state(self, booked_date: datetime, slot_info: dict) -> None:
+        state = {
+            "booked_date": booked_date.strftime("%Y-%m-%d"),
+            "booked_at": datetime.now().isoformat(timespec="seconds"),
+            "slot_info": {
+                "court_name": slot_info.get("court_name", ""),
+                "time_range": slot_info.get("time_range", ""),
+                "club_name": slot_info.get("club_name", ""),
+                "club_address": slot_info.get("club_address", ""),
+            },
+        }
+        try:
+            with open(self.state_file, "w") as f:
+                json.dump(state, f, indent=2)
+            logger.info(
+                "Booking state opgeslagen: %s op %s",
+                slot_info.get("club_name", ""), state["booked_date"]
+            )
+        except Exception as e:
+            logger.warning("Fout bij opslaan booking state: %s", e)
 
     # ------------------------------------------------------------------
     # Datumberekening
@@ -647,6 +698,10 @@ class PadelBooker:
         logger.info("KNLTB Padel Booking Script gestart")
         logger.info("=" * 60)
 
+        if self._is_already_booked():
+            logger.info("Script stopt: boeking al aanwezig voor een toekomstige datum.")
+            return True
+
         weeks_ahead = self.config["booking"].get("weeks_ahead", 4)
         booking_dates = self._get_upcoming_booking_dates(count=weeks_ahead)
         logger.info(
@@ -686,6 +741,7 @@ class PadelBooker:
                         if slot_info:
                             success = self._book_timeslot(page, slot_info)
                             if success:
+                                self._save_booking_state(booking_date, slot_info)
                                 return True
                             logger.warning(
                                 "Boeking mislukt bij %s op %s, volgende club proberen...",

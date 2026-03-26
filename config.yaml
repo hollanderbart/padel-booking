@@ -12,3 +12,4 @@ booking:
 
 session:
   cookies_file: .session_cookies.json
+  state_file: .booking_state.json
