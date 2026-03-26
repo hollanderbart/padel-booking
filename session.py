@@ -181,12 +181,22 @@ class SessionManager:
             except Exception:
                 pass
 
-            # Stap 1: vul e-mailadres in en activeer Livewire blur event
+            # Stap 1: vul e-mailadres in en klik de submit/pijl-knop
             page.wait_for_selector('#eail', state='visible', timeout=10000)
             email_input = page.locator('#eail')
             email_input.fill(email)
             email_input.blur()
-            page.wait_for_timeout(2500)
+            page.wait_for_timeout(1000)
+
+            # Klik de pijl/submit-knop naast het e-mailveld
+            submit_btn = page.locator('button[type="submit"], input[type="submit"], button.btn-primary, button:has(svg)')
+            if submit_btn.count() > 0:
+                logger.info("Submit-knop gevonden, klikken...")
+                submit_btn.first.click()
+            else:
+                # Fallback: verstuur het formulier via enter
+                email_input.press("Enter")
+            page.wait_for_timeout(3000)
 
             # Stap 2: check of een wachtwoordveld verscheen (legacy accounts)
             password_input = page.locator('input[type="password"], input[wire\\:model\\.blur="password"]')
