@@ -103,6 +103,9 @@ class PadelBooker:
         self.state_file = Path(
             self.config["session"].get("state_file", ".booking_state.json")
         )
+        self.history_file = Path(
+            self.config["session"].get("history_file", "booking_history.json")
+        )
         self._playwright = None
 
     # ------------------------------------------------------------------
@@ -162,6 +165,29 @@ class PadelBooker:
             )
         except Exception as e:
             logger.warning("Fout bij opslaan booking state: %s", e)
+
+    def _append_booking_history(self, booked_date: datetime, slot_info: dict) -> None:
+        entry = {
+            "booked_date": booked_date.strftime("%Y-%m-%d"),
+            "booked_at": datetime.now().isoformat(timespec="seconds"),
+            "club_name": slot_info.get("club_name", ""),
+            "club_address": slot_info.get("club_address", ""),
+            "court_name": slot_info.get("court_name", ""),
+            "time_range": slot_info.get("time_range", ""),
+        }
+        try:
+            if self.history_file.exists():
+                with open(self.history_file, "r") as f:
+                    history = json.load(f)
+            else:
+                history = []
+            history.insert(0, entry)   # nieuwste bovenaan
+            history = history[:20]     # max 20 entries
+            with open(self.history_file, "w") as f:
+                json.dump(history, f, indent=2)
+            logger.info("Boekingsgeschiedenis bijgewerkt: %s", self.history_file)
+        except Exception as e:
+            logger.warning("Fout bij schrijven boekingsgeschiedenis: %s", e)
 
     # ------------------------------------------------------------------
     # Datumberekening
@@ -742,6 +768,7 @@ class PadelBooker:
                             success = self._book_timeslot(page, slot_info)
                             if success:
                                 self._save_booking_state(booking_date, slot_info)
+                                self._append_booking_history(booking_date, slot_info)
                                 return True
                             logger.warning(
                                 "Boeking mislukt bij %s op %s, volgende club proberen...",

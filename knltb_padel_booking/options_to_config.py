@@ -29,6 +29,7 @@ config = {
     "session": {
         "cookies_file": ".session_cookies.json",
         "state_file": "/data/.booking_state.json",
+        "history_file": "/config/knltb/booking_history.json",
     },
 }
 with open("/app/config.yaml", "w") as f:

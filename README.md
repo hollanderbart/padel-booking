@@ -94,6 +94,67 @@ Of voeg dit toe aan `automations.yaml`:
 
 ---
 
+## Boekingsgeschiedenis in Home Assistant
+
+Na elke succesvolle boeking schrijft het script een entry naar `/config/knltb/booking_history.json`. Dit bestand is direct zichtbaar voor HA Core (hetzelfde pad als het al gemounte config-volume). Je kunt de geschiedenis weergeven als een tabel in een Lovelace dashboard via een `command_line` sensor.
+
+### Stap 1 — Voeg de sensor toe aan `configuration.yaml`
+
+Open `configuration.yaml` via de **File Editor** addon (of via **Settings → Add-ons → File editor → Open Web UI**) en voeg toe:
+
+```yaml
+command_line:
+  - sensor:
+      name: KNLTB Booking History
+      unique_id: knltb_booking_history
+      command: "cat /config/knltb/booking_history.json 2>/dev/null || echo '[]'"
+      value_template: "{{ value_json | length }} boeking(en)"
+      json_attributes_template: >
+        {{ value_json | tojson }}
+      scan_interval: 300
+```
+
+Herstart daarna Home Assistant (of ga naar **Developer Tools → YAML → Reload command_line entities**).
+
+### Stap 2 — Voeg de Lovelace markdown card toe
+
+Ga naar je dashboard, klik **Edit → Add card → Manual** en plak:
+
+```yaml
+type: markdown
+title: Padel Boekingen
+content: >
+  {% set bookings = state_attr('sensor.knltb_booking_history', 'value') | from_json %}
+  {% if bookings %}
+  | Datum | Geboekt op | Club | Baan | Tijd |
+  |-------|-----------|------|------|------|
+  {% for b in bookings %}
+  | {{ b.booked_date }} | {{ b.booked_at[:16] | replace('T', ' ') }} | {{ b.club_name }} | {{ b.court_name }} | {{ b.time_range }} |
+  {% endfor %}
+  {% else %}
+  *Nog geen boekingen.*
+  {% endif %}
+```
+
+### Formaat van `booking_history.json`
+
+```json
+[
+  {
+    "booked_date": "2026-04-03",
+    "booked_at": "2026-03-26T00:01:47",
+    "club_name": "Sportcentrum Boskoop",
+    "club_address": "Koningin Julianaplein 1, Boskoop",
+    "court_name": "Padelbaan 2",
+    "time_range": "19:30 - 21:00 90 minuten"
+  }
+]
+```
+
+Het bestand bevat maximaal 20 entries. De nieuwste boeking staat bovenaan.
+
+---
+
 ## Push notificaties
 
 Bij een succesvolle boeking ontvang je een push notificatie met:
