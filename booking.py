@@ -106,6 +106,9 @@ class PadelBooker:
         self.history_file = Path(
             self.config["session"].get("history_file", "booking_history.json")
         )
+        self.last_run_file = Path(
+            self.config["session"].get("last_run_file", "last_run.json")
+        )
         self._playwright = None
 
     # ------------------------------------------------------------------
@@ -189,6 +192,16 @@ class PadelBooker:
             logger.info("Boekingsgeschiedenis bijgewerkt: %s", self.history_file)
         except Exception as e:
             logger.warning("Fout bij schrijven boekingsgeschiedenis: %s", e)
+
+    def _write_last_run(self, success: bool) -> None:
+        try:
+            with open(self.last_run_file, "w") as f:
+                json.dump({
+                    "last_run": datetime.now().isoformat(timespec="seconds"),
+                    "success": success,
+                }, f, indent=2)
+        except Exception as e:
+            logger.warning("Fout bij schrijven last_run: %s", e)
 
     # ------------------------------------------------------------------
     # Datumberekening
@@ -730,6 +743,7 @@ class PadelBooker:
 
         if self._is_already_booked():
             logger.info("Script stopt: boeking al aanwezig voor een toekomstige datum.")
+            self._write_last_run(success=True)
             return True
 
         weeks_ahead = self.config["booking"].get("weeks_ahead", 4)
@@ -773,6 +787,7 @@ class PadelBooker:
                             if success:
                                 self._save_booking_state(booking_date, slot_info)
                                 self._append_booking_history(booking_date, slot_info)
+                                self._write_last_run(success=True)
                                 return True
                             logger.warning(
                                 "Boeking mislukt bij %s op %s, volgende club proberen...",
@@ -783,11 +798,13 @@ class PadelBooker:
                     "Geen beschikbaar tijdslot gevonden voor alle %d datum(s) bij alle %d club(s)",
                     len(booking_dates), len(clubs),
                 )
+                self._write_last_run(success=False)
                 return False
 
             except Exception as e:
                 error_msg = f"Onverwachte fout: {e}"
                 logger.exception(error_msg)
+                self._write_last_run(success=False)
                 return False
 
             finally:

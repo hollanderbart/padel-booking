@@ -30,6 +30,7 @@ config = {
         "cookies_file": ".session_cookies.json",
         "state_file": "/data/.booking_state.json",
         "history_file": "/config/knltb/booking_history.json",
+        "last_run_file": "/config/knltb/last_run.json",
     },
 }
 with open("/app/config.yaml", "w") as f:
