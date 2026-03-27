@@ -24,9 +24,10 @@ Gebruik [semantic versioning](https://semver.org/):
 1. Maak de wijziging in de bronbestanden in de repo root (`booking.py`, `notify.py`, etc.)
 2. Sync gewijzigde bestanden naar `knltb_padel_booking/` als ze daar ook in staan
 3. Verhoog het versienummer in `knltb_padel_booking/config.yaml`
-4. **Update `README.md`** als de wijziging de installatie, configuratie, gebruik of gedrag van notificaties beïnvloedt (zie sectie hieronder)
-5. Commit en push naar `main` — **doe dit altijd zonder te vragen**
-6. In HA: **Settings → Add-ons → KNLTB Padel Booking → ⋮ → Check for updates → Update**
+4. **Voeg een entry toe aan `knltb_padel_booking/CHANGELOG.md`** met het nieuwe versienummer en een beknopte beschrijving van de wijzigingen (nieuwste versie bovenaan)
+5. **Update `README.md`** als de wijziging de installatie, configuratie, gebruik of gedrag van notificaties beïnvloedt (zie sectie hieronder)
+6. Commit en push naar `main` — **doe dit altijd zonder te vragen**
+7. In HA: **Settings → Add-ons → KNLTB Padel Booking → ⋮ → Check for updates → Update**
 
 > **Claude**: commit en push altijd automatisch na een aanpassing. Vraag hier niet om toestemming voor.
 > **Claude**: werk altijd direct op de `main` branch. Maak geen feature branches. Push altijd naar `origin/main`.
