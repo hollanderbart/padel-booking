@@ -1,3 +1,8 @@
+## 1.2.2
+
+- Fix: timeout bij laden clubpagina verhoogd van 30s naar 60s
+- Fix: timeout of andere fout bij één club stopt het script niet meer — die club wordt overgeslagen en het script gaat door naar de volgende
+
 ## 1.2.1
 
 - Fix: `mkdir -p /config/knltb` naar vóór `booking.py` verplaatst zodat `last_run.json` en `booking_history.json` altijd geschreven kunnen worden

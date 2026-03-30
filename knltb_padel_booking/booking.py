@@ -417,7 +417,7 @@ class PadelBooker:
             club["name"], date_str, time_start, time_end
         )
 
-        page.goto(club["url"], wait_until="load", timeout=30000)
+        page.goto(club["url"], wait_until="load", timeout=60000)
         page.wait_for_timeout(1500)
         self._accept_cookies(page)
 
@@ -781,7 +781,14 @@ class PadelBooker:
                     date_str = booking_date.strftime("%d-%m-%Y")
                     logger.info("Probeer datum: %s", date_str)
                     for club in clubs:
-                        slot_info = self._find_timeslot(page, club, booking_date=booking_date)
+                        try:
+                            slot_info = self._find_timeslot(page, club, booking_date=booking_date)
+                        except Exception as club_err:
+                            logger.warning(
+                                "Fout bij %s op %s, volgende club proberen... (%s)",
+                                club["name"], date_str, club_err,
+                            )
+                            continue
                         if slot_info:
                             success = self._book_timeslot(page, slot_info)
                             if success:
