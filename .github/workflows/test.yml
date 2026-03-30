@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installeer dependencies
+        run: pip install -r requirements.txt
+
+      - name: Draai unit tests
+        run: pytest test_unit.py -v
+
+  integration-test:
+    name: Integratietest (met credentials)
+    runs-on: ubuntu-latest
+    if: ${{ secrets.KNLTB_EMAIL != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installeer dependencies
+        run: pip install -r requirements.txt
+
+      - name: Installeer Playwright Chromium
+        run: playwright install chromium --with-deps
+
+      - name: Draai integratietest
+        env:
+          KNLTB_EMAIL: ${{ secrets.KNLTB_EMAIL }}
+          KNLTB_PASSWORD: ${{ secrets.KNLTB_PASSWORD }}
+        run: pytest test_integration.py -v -s
