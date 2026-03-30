@@ -247,25 +247,42 @@ def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | N
     if not on_checkout:
         return None
 
-    # Zoek de betaalknop en lees de href uit — klik NIET
-    pay_selectors = [
-        'a:has-text("Betalen")',
-        'a:has-text("Nu betalen")',
-        'a[href*="betalen"]',
-        'a[href*="payment"]',
-        'a:has-text("Afrekenen")',
-    ]
-    for _ in range(6):  # maximaal ~12 seconden wachten
-        for sel in pay_selectors:
+    # Stap 4: wacht tot de TOS checkbox geladen is (Livewire laadt asynchroon)
+    # dan aanvinken via JS zodat Alpine.js x-model="accepted" triggert
+    tos_checkbox = page.locator("input#tos")
+    try:
+        tos_checkbox.wait_for(state="visible", timeout=10000)
+    except Exception:
+        pass
+    if tos_checkbox.count() > 0 and not tos_checkbox.is_checked():
+        page.evaluate("document.querySelector('input#tos').click()")
+        page.wait_for_timeout(1000)
+
+    # Stap 5: klik "Betaling starten" en lees de betaalprovider-URL uit page.url
+    pay_btn = page.locator('button:has-text("Betaling starten")')
+    if pay_btn.count() == 0:
+        for sel in ['button:has-text("Betalen")', 'button:has-text("Nu betalen")', 'a:has-text("Betalen")']:
             candidate = page.locator(sel)
             if candidate.count() > 0 and candidate.first.is_visible():
-                href = candidate.first.get_attribute("href") or ""
-                if href:
-                    return href
-        page.wait_for_timeout(2000)
+                pay_btn = candidate
+                break
 
-    # Betaalknop is een button (geen href) — geef checkout-URL terug als fallback
-    return checkout_url
+    if pay_btn.count() == 0 or not pay_btn.first.is_visible():
+        # Geen betaalknop gevonden — geef checkout-URL terug als fallback
+        return checkout_url
+
+    pay_btn.first.click()
+    # reCAPTCHA kan ~6 seconden duren voor navigatie plaatsvindt
+    try:
+        page.wait_for_url(
+            lambda url: url != checkout_url,
+            timeout=20000,
+        )
+    except Exception:
+        pass
+    page.wait_for_timeout(2000)
+
+    return page.url
 
 
 def test_full_booking_flow(headed):

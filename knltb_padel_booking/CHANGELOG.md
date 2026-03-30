@@ -1,3 +1,10 @@
+## 1.2.5
+
+- Fix: echte betaalprovider-URL wordt nu correct opgehaald en verstuurd in de notificatie
+- Fix: voorwaarden-checkbox wordt aangevinkt via JavaScript zodat Alpine.js x-model triggert
+- Fix: wacht expliciet op zichtbaarheid van de TOS-checkbox na Livewire-navigatie in plaats van vaste timeout
+- Fix: reCAPTCHA-vertraging afgedekt met 20s timeout op wait_for_url
+
 ## 1.2.4
 
 - Fix: betaalknop wordt niet meer geklikt — de `href` van de betaallink wordt uitgelezen en verstuurd in de notificatie zonder de betaling zelf af te ronden

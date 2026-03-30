@@ -674,40 +674,46 @@ class PadelBooker:
                 pass
             return False
 
-        logger.info("Winkelwagen bereikt — wachten op betaalknop...")
+        logger.info("Winkelwagen bereikt — voorwaarden accepteren en betaallink ophalen...")
 
-        # Wacht op de betaalknop en klik erop
-        pay_selectors = [
-            'a:has-text("Betalen")',
-            'button:has-text("Betalen")',
-            'a:has-text("Afrekenen")',
-            'button:has-text("Nu betalen")',
-            'a[href*="betalen"]',
-            'a[href*="payment"]',
-        ]
-        pay_btn = None
-        for _ in range(6):  # maximaal ~12 seconden wachten
-            for sel in pay_selectors:
+        # Stap 4: wacht tot de TOS checkbox geladen is (Livewire laadt asynchroon)
+        # dan aanvinken via JS zodat Alpine.js x-model="accepted" triggert
+        tos_checkbox = page.locator("input#tos")
+        try:
+            tos_checkbox.wait_for(state="visible", timeout=10000)
+        except Exception:
+            logger.warning("TOS checkbox niet gevonden binnen 10s")
+        if tos_checkbox.count() > 0 and not tos_checkbox.is_checked():
+            page.evaluate("document.querySelector('input#tos').click()")
+            page.wait_for_timeout(1000)
+            logger.info("Voorwaarden geaccepteerd")
+
+        # Stap 5: klik "Betaling starten" — navigeert naar betaalprovider
+        pay_btn = page.locator('button:has-text("Betaling starten")')
+        if pay_btn.count() == 0:
+            # Fallback selectors voor andere betaalknopteksten
+            for sel in ['button:has-text("Betalen")', 'button:has-text("Nu betalen")', 'a:has-text("Betalen")']:
                 candidate = page.locator(sel)
-                if candidate.count() > 0:
-                    try:
-                        if candidate.first.is_visible():
-                            pay_btn = candidate
-                            break
-                    except Exception:
-                        pass
-            if pay_btn:
-                break
-            page.wait_for_timeout(2000)
+                if candidate.count() > 0 and candidate.first.is_visible():
+                    pay_btn = candidate
+                    break
 
-        if pay_btn:
-            # Lees de href uit zonder te klikken — de betaling rondt de gebruiker zelf af
-            payment_url = pay_btn.first.get_attribute("href") or ""
-            if payment_url:
-                logger.info("Betaallink gevonden: %s", payment_url)
-                current_url = payment_url
-            else:
-                logger.info("Betaalknop heeft geen href — gebruik checkout-URL")
+        if pay_btn.count() > 0 and pay_btn.first.is_visible():
+            logger.info("Betaalknop gevonden, klikken om betaalprovider-URL op te halen...")
+            pay_btn.first.click()
+            # reCAPTCHA kan ~6 seconden duren voor navigatie plaatsvindt
+            try:
+                page.wait_for_url(
+                    lambda url: url != current_url,
+                    timeout=20000,
+                )
+            except Exception:
+                pass
+            page.wait_for_timeout(2000)
+            current_url = page.url
+            logger.info("Betaalprovider-URL: %s", current_url)
+        else:
+            logger.warning("Betaalknop niet gevonden — gebruik checkout-URL als fallback")
 
         # Sla payment URL op in slot_info zodat history hem kan bewaren
         slot_info["payment_url"] = current_url
