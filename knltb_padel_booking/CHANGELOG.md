@@ -1,3 +1,8 @@
+## 1.2.1
+
+- Fix: `mkdir -p /config/knltb` naar vóór `booking.py` verplaatst zodat `last_run.json` en `booking_history.json` altijd geschreven kunnen worden
+- Fix: `json_attributes_template` sensor gebruikt nu `{"bookings": value_json}` zodat Lovelace card `state_attr(..., 'bookings')` direct als lijst kan gebruiken (was kapot door dubbele JSON-encoding)
+
 ## 1.2.0
 
 - Voeg `CHANGELOG.md` toe aan addon voor weergave in HA Changelog tabblad

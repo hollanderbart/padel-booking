@@ -110,7 +110,7 @@ command_line:
       command: "cat /config/knltb/booking_history.json 2>/dev/null || echo '[]'"
       value_template: "{{ value_json | length }} boeking(en)"
       json_attributes_template: >
-        {{ value_json | tojson }}
+        {{ {"bookings": value_json} | tojson }}
       scan_interval: 300
 ```
 
@@ -124,7 +124,7 @@ Ga naar je dashboard, klik **Edit → Add card → Manual** en plak:
 type: markdown
 title: Padel Boekingen
 content: >
-  {% set bookings = state_attr('sensor.knltb_booking_history', 'value') | from_json %}
+  {% set bookings = state_attr('sensor.knltb_booking_history', 'bookings') %}
   {% if bookings %}
   | Datum | Geboekt op | Club | Baan | Tijd |
   |-------|-----------|------|------|------|
