@@ -247,6 +247,24 @@ def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | N
     if not on_checkout:
         return None
 
+    # Zoek de betaalknop en lees de href uit — klik NIET
+    pay_selectors = [
+        'a:has-text("Betalen")',
+        'a:has-text("Nu betalen")',
+        'a[href*="betalen"]',
+        'a[href*="payment"]',
+        'a:has-text("Afrekenen")',
+    ]
+    for _ in range(6):  # maximaal ~12 seconden wachten
+        for sel in pay_selectors:
+            candidate = page.locator(sel)
+            if candidate.count() > 0 and candidate.first.is_visible():
+                href = candidate.first.get_attribute("href") or ""
+                if href:
+                    return href
+        page.wait_for_timeout(2000)
+
+    # Betaalknop is een button (geen href) — geef checkout-URL terug als fallback
     return checkout_url
 
 
@@ -301,12 +319,12 @@ def test_full_booking_flow(headed):
             )
 
             print("\n" + "=" * 60)
-            print("TEST GESLAAGD — checkout-URL bereikt (geen echte boeking)")
+            print("TEST GESLAAGD — betaallink achterhaald (geen echte boeking)")
             print("=" * 60)
-            print(f"Club:         {slot_info['club_name']}")
-            print(f"Baan:         {slot_info['court_name']}")
-            print(f"Tijd:         {slot_info['time_range']}")
-            print(f"Checkout-URL: {checkout_url}")
+            print(f"Club:        {slot_info['club_name']}")
+            print(f"Baan:        {slot_info['court_name']}")
+            print(f"Tijd:        {slot_info['time_range']}")
+            print(f"Betaallink:  {checkout_url}")
             print("=" * 60 + "\n")
 
         finally:

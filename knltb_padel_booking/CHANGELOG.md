@@ -1,3 +1,8 @@
+## 1.2.4
+
+- Fix: betaalknop wordt niet meer geklikt — de `href` van de betaallink wordt uitgelezen en verstuurd in de notificatie zonder de betaling zelf af te ronden
+- Fix: integratietest doet hetzelfde: leest betaallink uit zonder te klikken, maakt geen echte boeking
+
 ## 1.2.3
 
 - Fix: boeking faalde in headless mode — na klikken op "Afrekenen" werd de URL-check te vroeg uitgevoerd omdat Livewire asynchroon navigeert; vervangen door `wait_for_url` zodat het script wacht tot de navigatie daadwerkelijk plaatsvindt

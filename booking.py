@@ -701,11 +701,13 @@ class PadelBooker:
             page.wait_for_timeout(2000)
 
         if pay_btn:
-            logger.info("Betaalknop gevonden, klikken...")
-            pay_btn.first.click()
-            page.wait_for_timeout(3000)
-            current_url = page.url
-            logger.info("URL na betaalknop: %s", current_url)
+            # Lees de href uit zonder te klikken — de betaling rondt de gebruiker zelf af
+            payment_url = pay_btn.first.get_attribute("href") or ""
+            if payment_url:
+                logger.info("Betaallink gevonden: %s", payment_url)
+                current_url = payment_url
+            else:
+                logger.info("Betaalknop heeft geen href — gebruik checkout-URL")
 
         # Sla payment URL op in slot_info zodat history hem kan bewaren
         slot_info["payment_url"] = current_url
