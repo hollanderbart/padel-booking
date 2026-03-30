@@ -1,3 +1,7 @@
+## 1.2.3
+
+- Fix: boeking faalde in headless mode — na klikken op "Afrekenen" werd de URL-check te vroeg uitgevoerd omdat Livewire asynchroon navigeert; vervangen door `wait_for_url` zodat het script wacht tot de navigatie daadwerkelijk plaatsvindt
+
 ## 1.2.2
 
 - Fix: timeout bij laden clubpagina verhoogd van 30s naar 60s

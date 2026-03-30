@@ -628,9 +628,15 @@ class PadelBooker:
         logger.info("'Afrekenen'-knop klikken...")
         checkout_btn.first.click()
 
+        # Wacht tot de URL verandert (Livewire navigeert asynchroon)
+        checkout_url_keywords = ["reserveren", "winkelwagen", "payment", "checkout", "betaling", "betalen", "order", "bestelling"]
         try:
-            page.wait_for_load_state("load", timeout=10000)
+            page.wait_for_url(
+                lambda url: any(kw in url.lower() for kw in checkout_url_keywords),
+                timeout=15000,
+            )
         except Exception:
+            # Geen URL-verandering — kan Livewire zijn dat op dezelfde URL blijft
             pass
         page.wait_for_timeout(2000)
 
