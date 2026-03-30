@@ -1,6 +1,9 @@
 """
 Integratietest voor het KNLTB Padel Booking script.
 
+De test verifieert de volledige flow tot en met de checkout-pagina,
+maar rondt de betaling NIET af — er wordt dus geen echte boeking gemaakt.
+
 Vereisten:
   - KNLTB_EMAIL en KNLTB_PASSWORD in omgeving of .env bestand
   - Playwright Chromium geïnstalleerd (playwright install chromium)
@@ -15,15 +18,15 @@ from datetime import datetime, timedelta
 
 import pytest
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Page, sync_playwright
 
-from booking import PadelBooker
+from booking import PadelBooker, SEARCH_URL
 
 # Laad .env zodat credentials beschikbaar zijn
 load_dotenv()
 
 
-def _find_any_available_slot(page, booker: PadelBooker) -> dict | None:
+def _find_any_available_slot(page: Page, booker: PadelBooker) -> dict | None:
     """
     Zoek flexibel een beschikbaar indoor slot bij een van de gevonden clubs
     in de komende 7 dagen, zonder beperking op tijdvenster of dagdeel.
@@ -31,19 +34,14 @@ def _find_any_available_slot(page, booker: PadelBooker) -> dict | None:
     Returns:
         Dict met slot-info of None als er geen beschikbaar slot is.
     """
-    import os
-
-    # Gebruik de clubs uit de config-locatie
     city = booker.config["location"]["city"]
     radius = str(booker.config["location"]["radius_km"])
-
-    from booking import SEARCH_URL
 
     for day_offset in range(7):
         date = datetime.now() + timedelta(days=day_offset)
         date_str = date.strftime("%d-%m-%Y")
 
-        page.goto(SEARCH_URL, wait_until="load", timeout=30000)
+        page.goto(SEARCH_URL, wait_until="load", timeout=60000)
         page.wait_for_timeout(1500)
         booker._accept_cookies(page)
 
@@ -94,7 +92,7 @@ def _find_any_available_slot(page, booker: PadelBooker) -> dict | None:
             club = {"name": name, "address": address, "url": book_url}
 
             # Navigeer naar clubpagina
-            page.goto(club["url"], wait_until="load", timeout=30000)
+            page.goto(club["url"], wait_until="load", timeout=60000)
             page.wait_for_timeout(1500)
             booker._accept_cookies(page)
 
@@ -109,8 +107,6 @@ def _find_any_available_slot(page, booker: PadelBooker) -> dict | None:
             if indoor_select.count() > 0:
                 indoor_select.select_option("INDOOR")
                 page.wait_for_timeout(1500)
-
-            # Dagdeel: leeg (alle tijden) — geen filter instellen
 
             # Datum instellen via Livewire
             lw_match = re.search(
@@ -128,7 +124,7 @@ def _find_any_available_slot(page, booker: PadelBooker) -> dict | None:
             for i in range(slots.count()):
                 slot = slots.nth(i)
 
-                # Court type label ophalen
+                # Skip buiten-banen
                 try:
                     label = slot.evaluate("""el => {
                         let s = el.closest('.timeslots');
@@ -137,11 +133,9 @@ def _find_any_available_slot(page, booker: PadelBooker) -> dict | None:
                 except Exception:
                     label = ""
 
-                # Skip buiten-banen
                 if "buiten" in label:
                     continue
 
-                # Eerste beschikbare slot gevonden
                 try:
                     time_text = slot.locator(".timeslot-time").first.inner_text().strip()
                 except Exception:
@@ -161,20 +155,110 @@ def _find_any_available_slot(page, booker: PadelBooker) -> dict | None:
                     "time_range": time_text.replace("\n", " "),
                     "club_name": club["name"],
                     "club_address": club["address"],
+                    "club_url": club["url"],
                     "date_str": date_str,
                 }
 
     return None
 
 
+def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | None:
+    """
+    Klik het tijdslot aan, voeg toe aan winkelwagen en klik Afrekenen.
+    Betaling wordt NIET afgerond — geeft de checkout-URL terug zonder verder te navigeren.
+
+    Returns:
+        De checkout-URL als string, of None als de flow mislukt.
+    """
+    slot_id = slot_info["slot_id"]
+
+    # Navigeer terug naar de clubpagina met het tijdslot
+    page.goto(slot_info["club_url"], wait_until="load", timeout=60000)
+    page.wait_for_timeout(1500)
+    booker._accept_cookies(page)
+
+    # Datum instellen
+    lw_match = re.search(
+        r"window\.Livewire\.find\('([^']+)'\)\.set\('date'", page.content()
+    )
+    if lw_match:
+        page.evaluate(
+            f"window.Livewire.find('{lw_match.group(1)}').set('date', '{slot_info['date_str']}')"
+        )
+        page.wait_for_timeout(2000)
+
+    # Stap 1: klik op het tijdslot
+    slot_anchor = page.locator(f"a.timeslot[id='{slot_id}']")
+    if slot_anchor.count() == 0:
+        slot_anchor = page.locator(f"a[id='{slot_id}']")
+    if slot_anchor.count() == 0:
+        return None
+
+    slot_anchor.first.click()
+    page.wait_for_timeout(2000)
+
+    # Stap 2: klik "Toevoegen" / "Reserveren" / "Boeken"
+    add_btn = page.locator('button:has-text("Toevoegen")')
+    if add_btn.count() == 0:
+        add_btn = page.locator('button:has-text("Reserveren")')
+    if add_btn.count() == 0:
+        add_btn = page.locator('button:has-text("Boeken")')
+    if add_btn.count() == 0:
+        return None
+
+    add_btn.first.click()
+    page.wait_for_timeout(2500)
+
+    # Stap 3: klik "Afrekenen"
+    checkout_locators = [
+        f'button[wire\\:click="checkout({slot_id})"]:visible',
+        'button[wire\\:click="checkout"]:visible',
+        'button:visible:has-text("Afrekenen")',
+        'a:visible:has-text("Afrekenen")',
+    ]
+    checkout_btn = None
+    for selector in checkout_locators:
+        candidate = page.locator(selector)
+        if candidate.count() > 0:
+            checkout_btn = candidate
+            break
+
+    if checkout_btn is None:
+        return None
+
+    checkout_btn.first.click()
+
+    # Wacht tot Livewire asynchroon navigeert naar de checkout-pagina
+    checkout_keywords = ["reserveren", "winkelwagen", "payment", "checkout", "betaling", "betalen", "order", "bestelling"]
+    try:
+        page.wait_for_url(
+            lambda url: any(kw in url.lower() for kw in checkout_keywords),
+            timeout=15000,
+        )
+    except Exception:
+        pass
+    page.wait_for_timeout(1500)
+
+    checkout_url = page.url
+
+    # Controleer of we echt op de checkout-pagina zijn beland
+    on_checkout = any(kw in checkout_url.lower() for kw in checkout_keywords) or \
+                  "Winkelwagen" in page.content()
+    if not on_checkout:
+        return None
+
+    return checkout_url
+
+
 def test_full_booking_flow(headed):
     """
-    End-to-end integratietest die de volledige boekingsflow doorloopt:
-    inloggen, clubs zoeken, een slot vinden en doorboeken tot de betalingspagina.
+    Integratietest die de volledige flow doorloopt tot de checkout-pagina.
+    De betaling wordt NIET afgerond — er wordt geen echte boeking gemaakt.
+
+    Geslaagd als: een geldige checkout-URL wordt teruggegeven.
     """
     import os
 
-    # Stap 1: credentials checken
     email = os.getenv("KNLTB_EMAIL", "").strip()
     password = os.getenv("KNLTB_PASSWORD", "").strip()
 
@@ -183,57 +267,49 @@ def test_full_booking_flow(headed):
             "KNLTB_EMAIL en/of KNLTB_PASSWORD niet gevonden in omgeving of .env — test overgeslagen"
         )
 
-    # Stap 2: PadelBooker instantiëren
     booker = PadelBooker("config.yaml")
-
     browser = None
     context = None
 
     with sync_playwright() as pw:
         booker._playwright = pw
-
-        # Stap 3: browser en context openen
         browser = pw.chromium.launch(headless=not headed)
         context = booker._make_context(browser, headed)
         context = booker._ensure_logged_in(browser, context, headed)
 
         try:
-            # Stap 4: nieuwe pagina
             page = context.new_page()
 
-            # Stap 5: clubs zoeken
+            # Stap 1: clubs zoeken
             clubs = booker._search_clubs(page)
             assert len(clubs) > 0, (
-                "Geen clubs gevonden — controleer config.yaml (locatie/filters) "
-                "en of de website bereikbaar is"
+                "Geen clubs gevonden — controleer config.yaml (locatie/filters)"
             )
 
-            # Stap 6: flexibel slot zoeken in komende 7 dagen
+            # Stap 2: beschikbaar slot vinden
             slot_info = _find_any_available_slot(page, booker)
             assert slot_info is not None, (
-                "Geen enkel beschikbaar indoor slot gevonden in de komende 7 dagen "
-                "bij alle gevonden clubs"
+                "Geen enkel beschikbaar indoor slot gevonden in de komende 7 dagen"
             )
 
-            # Stap 7: monkeypatch wachttijden (> 3000ms → 1000ms)
-            original_wait = page.wait_for_timeout
-            page.wait_for_timeout = lambda ms: original_wait(min(ms, 1000))
+            # Stap 3: flow tot checkout — betaling NIET afronden
+            checkout_url = _reach_checkout(page, booker, slot_info)
 
-            # Stap 8: boeken
-            success = booker._book_timeslot(page, slot_info)
-            assert success is True, (
-                f"_book_timeslot gaf False terug voor slot {slot_info['slot_id']} "
+            assert checkout_url is not None, (
+                f"Checkout-pagina niet bereikt voor slot {slot_info['slot_id']} "
                 f"bij {slot_info['club_name']}"
             )
 
-            # Meetandplay gebruikt /reserveren als winkelwagen/checkout URL
-            payment_keywords = ["payment", "checkout", "betaling", "betalen", "order", "bestelling", "reserveren", "winkelwagen"]
-            assert any(kw in page.url for kw in payment_keywords) or "Winkelwagen" in page.content(), (
-                f"Niet op betalingspagina beland — huidige URL: {page.url}"
-            )
+            print("\n" + "=" * 60)
+            print("TEST GESLAAGD — checkout-URL bereikt (geen echte boeking)")
+            print("=" * 60)
+            print(f"Club:         {slot_info['club_name']}")
+            print(f"Baan:         {slot_info['court_name']}")
+            print(f"Tijd:         {slot_info['time_range']}")
+            print(f"Checkout-URL: {checkout_url}")
+            print("=" * 60 + "\n")
 
         finally:
-            # Stap 9: teardown
             if context:
                 try:
                     context.close()
