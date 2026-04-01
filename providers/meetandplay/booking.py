@@ -1,56 +1,26 @@
-#!/usr/bin/env python3
 """
-KNLTB Padel Booking Script
-Automatiseert het boeken van padelbanen op meetandplay.nl
-
-Werking:
-  1. Hergebruik opgeslagen cookies als de sessie nog geldig is.
-  2. Als de sessie verlopen is: probeer automatisch in te loggen via
-     KNLTB_EMAIL / KNLTB_PASSWORD uit het .env bestand. Als die niet
-     beschikbaar zijn, open dan een zichtbare browser voor handmatige login.
-  3. Zoek op meetandplay.nl/zoeken naar beschikbare clubs in de regio.
-  4. Ga naar de clubpagina en filter op Padel + binnenbaan + avond.
-  5. Selecteer het eerste beschikbare tijdslot dat binnen het gewenste
-     tijdvenster valt.
-  6. Klik door tot aan de betalingspagina en stuur een notificatie.
+Meet & Play booking logica voor meetandplay.nl.
+Gebruikt Playwright voor browser automatisering.
 """
 
-import json
 import logging
 import os
 import re
-import sys
-import yaml
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
 from playwright.sync_api import (
-    sync_playwright,
     Browser,
     BrowserContext,
     Page,
     TimeoutError as PlaywrightTimeoutError,
+    sync_playwright,
 )
 
-from session import SessionManager
-from notify import notify_booking_available
+from providers.base import ProviderResult, SlotInfo
+from providers.meetandplay.session import SessionManager
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Constanten
-# ---------------------------------------------------------------------------
 
 SEARCH_URL = "https://www.meetandplay.nl/zoeken"
 USER_AGENT = (
@@ -58,7 +28,6 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
-# Sport-ID's op meetandplay.nl
 SPORT_IDS = {
     "tennis": "1",
     "padel": "2",
@@ -66,17 +35,6 @@ SPORT_IDS = {
     "pickleball": "13",
 }
 
-# Dagelabels voor Livewire dagdeel-filter
-DAY_PARTS = {
-    "morning": "morning",
-    "ochtend": "morning",
-    "afternoon": "afternoon",
-    "middag": "afternoon",
-    "evening": "evening",
-    "avond": "evening",
-}
-
-# Dagnamen naar weekdag-nummer (0 = maandag)
 WEEKDAYS = {
     "monday": 0, "maandag": 0,
     "tuesday": 1, "dinsdag": 1,
@@ -88,148 +46,31 @@ WEEKDAYS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Hoofdklasse
-# ---------------------------------------------------------------------------
-
-class PadelBooker:
+class MeetAndPlayBooker:
     """Automatiseert het boeken van padelbanen op meetandplay.nl."""
 
-    def __init__(self, config_path: str = "config.yaml"):
-        self.config = self._load_config(config_path)
-        self.session_manager = SessionManager(
-            self.config["session"]["cookies_file"]
-        )
-        self.state_file = Path(
-            self.config["session"].get("state_file", ".booking_state.json")
-        )
-        self.history_file = Path(
-            self.config["session"].get("history_file", "booking_history.json")
-        )
-        self.last_run_file = Path(
-            self.config["session"].get("last_run_file", "last_run.json")
-        )
+    def __init__(self, request: dict):
+        self._request = request
+        self._booking = request["booking_request"]
+        self._credentials = request["credentials"]
+        self._provider_config = request.get("provider_config", {})
+        self._dry_run = request.get("dry_run", False)
+
+        cookies_file = self._provider_config.get("cookies_file", ".meetandplay_cookies.json")
+        self.session_manager = SessionManager(cookies_file)
         self._playwright = None
-
-    # ------------------------------------------------------------------
-    # Configuratie
-    # ------------------------------------------------------------------
-
-    def _load_config(self, config_path: str) -> dict:
-        config_file = Path(config_path)
-        if not config_file.exists():
-            raise FileNotFoundError(f"Configuratiebestand niet gevonden: {config_path}")
-        with open(config_file, "r") as f:
-            return yaml.safe_load(f)
-
-    # ------------------------------------------------------------------
-    # Deduplicatie
-    # ------------------------------------------------------------------
-
-    def _is_already_booked(self) -> bool:
-        if not self.state_file.exists():
-            return False
-        try:
-            with open(self.state_file, "r") as f:
-                state = json.load(f)
-            booked_date = datetime.strptime(state["booked_date"], "%Y-%m-%d").date()
-            today = datetime.now().date()
-            if booked_date >= today:
-                logger.info(
-                    "Al geboekt voor %s — boeking overgeslagen", booked_date.isoformat()
-                )
-                return True
-            logger.info(
-                "Vorige boeking (%s) is verlopen — nieuwe boeking starten",
-                booked_date.isoformat(),
-            )
-            return False
-        except Exception as e:
-            logger.warning("Fout bij lezen booking state: %s — doorgaan met boeken", e)
-            return False
-
-    def _save_booking_state(self, booked_date: datetime, slot_info: dict) -> None:
-        state = {
-            "booked_date": booked_date.strftime("%Y-%m-%d"),
-            "booked_at": datetime.now().isoformat(timespec="seconds"),
-            "slot_info": {
-                "court_name": slot_info.get("court_name", ""),
-                "time_range": slot_info.get("time_range", ""),
-                "club_name": slot_info.get("club_name", ""),
-                "club_address": slot_info.get("club_address", ""),
-            },
-        }
-        try:
-            with open(self.state_file, "w") as f:
-                json.dump(state, f, indent=2)
-            logger.info(
-                "Booking state opgeslagen: %s op %s",
-                slot_info.get("club_name", ""), state["booked_date"]
-            )
-        except Exception as e:
-            logger.warning("Fout bij opslaan booking state: %s", e)
-
-    def _append_booking_history(self, booked_date: datetime, slot_info: dict) -> None:
-        entry = {
-            "booked_date": booked_date.strftime("%Y-%m-%d"),
-            "booked_at": datetime.now().isoformat(timespec="seconds"),
-            "club_name": slot_info.get("club_name", ""),
-            "club_address": slot_info.get("club_address", ""),
-            "court_name": slot_info.get("court_name", ""),
-            "time_range": slot_info.get("time_range", ""),
-            "payment_url": slot_info.get("payment_url", ""),
-        }
-        try:
-            if self.history_file.exists():
-                with open(self.history_file, "r") as f:
-                    history = json.load(f)
-            else:
-                history = []
-            history.insert(0, entry)   # nieuwste bovenaan
-            history = history[:20]     # max 20 entries
-            with open(self.history_file, "w") as f:
-                json.dump(history, f, indent=2)
-            logger.info("Boekingsgeschiedenis bijgewerkt: %s", self.history_file)
-        except Exception as e:
-            logger.warning("Fout bij schrijven boekingsgeschiedenis: %s", e)
-
-    def _write_last_run(self, success: bool) -> None:
-        try:
-            with open(self.last_run_file, "w") as f:
-                json.dump({
-                    "last_run": datetime.now().isoformat(timespec="seconds"),
-                    "success": success,
-                }, f, indent=2)
-        except Exception as e:
-            logger.warning("Fout bij schrijven last_run: %s", e)
 
     # ------------------------------------------------------------------
     # Datumberekening
     # ------------------------------------------------------------------
 
-    def _get_next_booking_date(self) -> datetime:
-        """
-        Bereken de datum van de eerstvolgende boekingsdag (bijv. donderdag).
-
-        Als vandaag die dag is en het starttijdstip is nog niet verstreken,
-        wordt vandaag teruggegeven. Anders de volgende week.
-        """
-        return self._get_upcoming_booking_dates(count=1)[0]
-
     def _get_upcoming_booking_dates(self, count: int = 3) -> list:
-        """
-        Geef een lijst van de eerstvolgende `count` boekingsdagen (bijv. de komende
-        3 donderdagen) terug, gesorteerd van vroegst naar latest.
-
-        Als vandaag de gewenste dag is maar het tijdslot al voorbij is, wordt
-        vandaag overgeslagen en begint de reeks bij volgende week.
-        """
-        target_day_name = self.config["booking"]["day"].lower()
+        target_day_name = self._booking["day"].lower()
         target_weekday = WEEKDAYS.get(target_day_name)
         if target_weekday is None:
             raise ValueError(f"Ongeldige dag in config: {target_day_name}")
 
-        time_start_str = self.config["booking"]["time_start"]
+        time_start_str = self._booking["time_start"]
         target_hour, target_minute = map(int, time_start_str.split(":"))
 
         today = datetime.now()
@@ -249,7 +90,7 @@ class PadelBooker:
     # Browser setup
     # ------------------------------------------------------------------
 
-    def _make_context(self, browser: Browser, headless: bool) -> BrowserContext:
+    def _make_context(self, browser: Browser) -> BrowserContext:
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
             user_agent=USER_AGENT,
@@ -260,7 +101,6 @@ class PadelBooker:
         return context
 
     def _accept_cookies(self, page: Page) -> None:
-        """Sluit het cookieconsentvenster als het aanwezig is."""
         try:
             btn = page.locator('button:has-text("Alles toestaan")')
             if btn.count() > 0:
@@ -273,12 +113,7 @@ class PadelBooker:
     # Login
     # ------------------------------------------------------------------
 
-    def _ensure_logged_in(
-        self, browser: Browser, context: BrowserContext, headless: bool
-    ) -> BrowserContext:
-        """
-        Controleer of de sessie nog geldig is en log opnieuw in indien nodig.
-        """
+    def _ensure_logged_in(self, browser: Browser, context: BrowserContext) -> BrowserContext:
         page = context.new_page()
         logged_in = self.session_manager.is_logged_in(page)
         page.close()
@@ -286,25 +121,22 @@ class PadelBooker:
         if logged_in:
             return context
 
-        # Sessie verlopen
         context.close()
 
-        email = os.getenv("KNLTB_EMAIL", "").strip()
-        password = os.getenv("KNLTB_PASSWORD", "").strip()
+        email = self._credentials.get("email", "").strip()
+        password = self._credentials.get("password", "").strip()
 
         if email and password:
-            logger.info("Credentials gevonden in omgeving — automatisch inloggen...")
+            logger.info("Credentials gevonden — automatisch inloggen...")
             new_context, success = self.session_manager.auto_login(browser, email, password)
             if success:
                 return new_context
-            logger.error("Automatisch inloggen mislukt — script stopt (geen X server beschikbaar in Docker)")
             raise RuntimeError(
-                "Automatisch inloggen mislukt. Controleer KNLTB_EMAIL/KNLTB_PASSWORD in /config/knltb/.env"
+                "Automatisch inloggen mislukt. Controleer KNLTB_EMAIL/KNLTB_PASSWORD."
             )
 
-        logger.error("Geen KNLTB_EMAIL/KNLTB_PASSWORD in omgeving — script stopt")
         raise RuntimeError(
-            "Geen credentials gevonden. Voeg KNLTB_EMAIL en KNLTB_PASSWORD toe aan /config/knltb/.env"
+            "Geen credentials gevonden. Voeg KNLTB_EMAIL en KNLTB_PASSWORD toe aan .env"
         )
 
     # ------------------------------------------------------------------
@@ -312,21 +144,9 @@ class PadelBooker:
     # ------------------------------------------------------------------
 
     def _search_clubs(self, page: Page) -> list[dict]:
-        """
-        Zoek beschikbare clubs op meetandplay.nl/zoeken.
-
-        Filters:
-          - Sport: Padel (ID 2)
-          - Locatie: stad uit config
-          - Afstand: straal uit config
-          - Daktype: INDOOR
-
-        Returns:
-            Lijst van dicts met 'name', 'address', 'url' per club.
-        """
-        city = self.config["location"]["city"]
-        radius = str(self.config["location"]["radius_km"])
-        booking_date = self._get_next_booking_date()
+        city = self._booking["location"]["city"]
+        radius = str(self._booking["location"]["radius_km"])
+        booking_date = self._get_upcoming_booking_dates(count=1)[0]
         date_str = booking_date.strftime("%d-%m-%Y")
 
         logger.info("Zoeken naar clubs in %s (straal %s km) op %s...", city, radius, date_str)
@@ -335,29 +155,24 @@ class PadelBooker:
         page.wait_for_timeout(1500)
         self._accept_cookies(page)
 
-        # Sport: Padel (sla over als het veld uitgeschakeld is — al vooringesteld)
         sport_select = page.locator("select#sportId")
         if sport_select.count() > 0 and not sport_select.is_disabled():
             sport_select.select_option("2")
             page.wait_for_timeout(1500)
 
-        # Locatie invoeren en blur triggeren (Livewire)
         loc_input = page.locator("input#location")
         loc_input.fill(city)
         loc_input.blur()
         page.wait_for_timeout(2500)
 
-        # Afstand
         page.locator("select#distance").select_option(radius)
         page.wait_for_timeout(1500)
 
-        # Daktype: binnen
-        court_type = self.config["booking"].get("court_type", "indoor")
+        court_type = self._booking.get("court_type", "indoor")
         if court_type == "indoor":
             page.locator("select#indoor").select_option("INDOOR")
             page.wait_for_timeout(1500)
 
-        # Datum instellen via Livewire (het datumveld is readonly)
         html = page.content()
         lw_match = re.search(
             r"window\.Livewire\.find\('([^']+)'\)\.set\('date'", html
@@ -371,7 +186,6 @@ class PadelBooker:
         else:
             logger.warning("Livewire datum-component niet gevonden op zoekpagina")
 
-        # Haal resultaten op
         cards = page.locator(".c-club-card.mp-club-card")
         count = cards.count()
         logger.info("%d club(s) gevonden na filteren", count)
@@ -394,23 +208,13 @@ class PadelBooker:
     # ------------------------------------------------------------------
 
     def _find_timeslot(self, page: Page, club: dict, booking_date: Optional[datetime] = None) -> Optional[dict]:
-        """
-        Navigeer naar de clubpagina, stel filters in en zoek een tijdslot
-        dat binnen het gewenste tijdvenster valt.
-
-        Args:
-            booking_date: De doeldatum. Als None, wordt de eerstvolgende boekingsdag gebruikt.
-
-        Returns:
-            Dict met 'slot_id', 'court_name', 'time_range' of None.
-        """
-        time_start = self.config["booking"]["time_start"]   # bijv. "19:30"
-        time_end = self.config["booking"]["time_end"]       # bijv. "21:00"
-        duration_minutes = int(self.config["booking"].get("duration_minutes", 90))
+        time_start = self._booking["time_start"]
+        time_end = self._booking["time_end"]
+        duration_minutes = int(self._booking.get("duration_minutes", 90))
         if booking_date is None:
-            booking_date = self._get_next_booking_date()
+            booking_date = self._get_upcoming_booking_dates(count=1)[0]
         date_str = booking_date.strftime("%d-%m-%Y")
-        game_type = self.config["booking"].get("game_type", "double").lower()
+        game_type = self._booking.get("game_type", "double").lower()
 
         logger.info(
             "Controleren tijdsloten bij %s voor %s (%s–%s)...",
@@ -421,36 +225,29 @@ class PadelBooker:
         page.wait_for_timeout(1500)
         self._accept_cookies(page)
 
-        # Sport: Padel (sla over als het veld uitgeschakeld is — al vooringesteld)
         sport_select = page.locator("select#sportId")
         if sport_select.count() > 0 and not sport_select.is_disabled():
             sport_select.select_option("2")
             page.wait_for_timeout(1500)
 
-        # Daktype: binnen
-        court_type = self.config["booking"].get("court_type", "indoor")
+        court_type = self._booking.get("court_type", "indoor")
         if court_type == "indoor":
             indoor_select = page.locator("select#indoor")
             if indoor_select.count() > 0:
                 indoor_select.select_option("INDOOR")
                 page.wait_for_timeout(1500)
 
-        # Dagdeel: avond
         daypart_select = page.locator("select#dayPart")
         if daypart_select.count() > 0:
             daypart_select.select_option("evening")
             page.wait_for_timeout(1500)
 
-        # Duur selecteren (bijv. 90 minuten)
         duration_select = page.locator("select#duration")
         if duration_select.count() > 0:
             duration_select.select_option(str(duration_minutes))
             page.wait_for_timeout(1500)
             logger.info("Duur ingesteld op %d minuten", duration_minutes)
-        else:
-            logger.debug("Geen duration-select gevonden op pagina")
 
-        # Datum instellen via Livewire
         html = page.content()
         lw_match = re.search(
             r"window\.Livewire\.find\('([^']+)'\)\.set\('date'", html
@@ -462,22 +259,17 @@ class PadelBooker:
             )
             page.wait_for_timeout(2500)
 
-        # Parseer start- en eindtijd voor vergelijking
         start_h, start_m = map(int, time_start.split(":"))
         end_h, end_m = map(int, time_end.split(":"))
         start_minutes = start_h * 60 + start_m
         end_minutes = end_h * 60 + end_m
 
-        # Zoek door alle beschikbare tijdsloten
         slots = page.locator(".timeslot-container a.timeslot")
         logger.info("%d tijdslot(en) gevonden bij %s", slots.count(), club["name"])
 
         for i in range(slots.count()):
             slot = slots.nth(i)
 
-            # Controleer court type label (binnen/dubbelspel) wanneer game_type=double
-            # Het bovenliggende element bevat de court-type context.
-            # We lezen de tekst van het dichtstbijzijnde mp-court-type boven dit slot.
             try:
                 court_type_label = slot.evaluate(
                     """el => {
@@ -490,33 +282,26 @@ class PadelBooker:
             except Exception:
                 court_type_label = ""
 
-            # Sla buiten-banen over als we binnenbanen willen
             if court_type == "indoor" and "buiten" in court_type_label:
                 continue
-
-            # Controleer of game_type overeenkomt (dubbelspel / enkelspel)
             if game_type == "double" and "enkelspel" in court_type_label:
                 continue
             if game_type == "single" and "dubbelspel" in court_type_label:
                 continue
 
-            # Lees tijdstip uit het tijdslot
             try:
                 time_text = slot.locator(".timeslot-time").first.inner_text().strip()
-                # Format: "19:00 - 20:00\n90 minuten" of "19:00 - 20:00"
                 slot_start_str = time_text.split("–")[0].split("-")[0].strip().split("\n")[0].strip()
-                slot_start_str = slot_start_str[:5]  # "HH:MM"
+                slot_start_str = slot_start_str[:5]
                 sh, sm = map(int, slot_start_str.split(":"))
                 slot_start_min = sh * 60 + sm
             except Exception as e:
                 logger.debug("Kon tijdslot-tijd niet lezen: %s", e)
                 continue
 
-            # Controleer of het tijdslot binnen het gewenste venster valt
             if not (start_minutes <= slot_start_min < end_minutes):
                 continue
 
-            # Controleer duur als die vermeld staat in de tijdslot-tekst
             duration_match = re.search(r"(\d+)\s*min", time_text, re.IGNORECASE)
             if duration_match:
                 slot_duration = int(duration_match.group(1))
@@ -527,7 +312,6 @@ class PadelBooker:
                     )
                     continue
 
-            # Gevonden!
             try:
                 court_name = slot.locator(".timeslot-name").first.inner_text().strip()
                 court_name = court_name.split("\n")[0].strip()
@@ -554,18 +338,6 @@ class PadelBooker:
     # ------------------------------------------------------------------
 
     def _book_timeslot(self, page: Page, slot_info: dict) -> bool:
-        """
-        Voeg het tijdslot toe aan de winkelwagen en ga naar betaling.
-
-        De flow:
-          1. Klik op het tijdslot → "Toevoegen"-knop verschijnt
-          2. Klik "Toevoegen" (voegt toe aan winkelwagen)
-          3. Klik "Afrekenen" → redirect naar betalingspagina
-          4. Stuur notificatie
-
-        Returns:
-            True als betalingspagina bereikt, False anders.
-        """
         slot_id = slot_info["slot_id"]
 
         logger.info(
@@ -573,12 +345,9 @@ class PadelBooker:
             slot_id, slot_info["time_range"], slot_info["club_name"]
         )
 
-        # Stap 1: klik op het tijdslot (opent detail/modal)
-        # Gebruik altijd attribuut-selector: numerieke IDs zijn ongeldig als CSS #id selector
         slot_anchor = page.locator(f"a.timeslot[id='{slot_id}']")
         if slot_anchor.count() == 0:
             slot_anchor = page.locator(f"a[id='{slot_id}']")
-
         if slot_anchor.count() == 0:
             logger.warning("Tijdslot-anker niet gevonden voor id %s", slot_id)
             return False
@@ -586,25 +355,19 @@ class PadelBooker:
         slot_anchor.first.click()
         page.wait_for_timeout(2000)
 
-        # Stap 2: klik "Toevoegen" — kan binnen het slot staan OF buiten (modal/sidebar)
         add_btn = page.locator('button:has-text("Toevoegen")')
         if add_btn.count() == 0:
-            # Alternatieve tekst
             add_btn = page.locator('button:has-text("Reserveren")')
         if add_btn.count() == 0:
             add_btn = page.locator('button:has-text("Boeken")')
-
         if add_btn.count() == 0:
             logger.warning("'Toevoegen'/'Reserveren'/'Boeken'-knop niet gevonden na klik op tijdslot %s", slot_id)
-            logger.debug("Pagina-inhoud (fragment): %s", page.content()[:2000])
             return False
 
         logger.info("'%s'-knop gevonden, klikken...", add_btn.first.inner_text().strip())
         add_btn.first.click()
         page.wait_for_timeout(2500)
 
-        # Stap 3: klik "Afrekenen" — gebruik de zichtbare knop via Playwright's :visible filter
-        # Er kunnen meerdere "Afrekenen"-knoppen in de DOM zijn (zichtbaar + verborgen).
         checkout_locators = [
             f'button[wire\\:click="checkout({slot_id})"]:visible',
             'button[wire\\:click="checkout"]:visible',
@@ -622,13 +385,11 @@ class PadelBooker:
 
         if checkout_btn is None:
             logger.warning("'Afrekenen'-knop niet gevonden na toevoegen")
-            logger.debug("Pagina-inhoud (fragment): %s", page.content()[:3000])
             return False
 
         logger.info("'Afrekenen'-knop klikken...")
         checkout_btn.first.click()
 
-        # Wacht tot de URL verandert (Livewire navigeert asynchroon)
         checkout_url_keywords = ["reserveren", "winkelwagen", "payment", "checkout", "betaling", "betalen", "order", "bestelling"]
         try:
             page.wait_for_url(
@@ -636,48 +397,41 @@ class PadelBooker:
                 timeout=15000,
             )
         except Exception:
-            # Geen URL-verandering — kan Livewire zijn dat op dezelfde URL blijft
             pass
         page.wait_for_timeout(2000)
 
         current_url = page.url
         logger.info("URL na afrekenen: %s", current_url)
 
-        # Sessie verlopen tijdens boeking?
         if "inloggen" in current_url:
             logger.error("Doorgestuurd naar loginpagina tijdens boeking — sessie verlopen")
             return False
 
-        # Meetandplay gebruikt Livewire: de winkelwagenpagina laadt op dezelfde URL.
-        # Controleer of de breadcrumb of paginatitel "Winkelwagen" toont.
         try:
             page_html = page.content()
         except Exception:
             page_html = ""
+
         on_cart = (
             "winkelwagen" in current_url.lower()
             or "Winkelwagen" in page_html
         )
 
         if not on_cart:
-            # Mogelijk directe redirect naar betaalpagina of /reserveren
             payment_keywords = ["payment", "checkout", "betaling", "betalen", "order", "bestelling", "reserveren"]
             if any(kw in current_url.lower() for kw in payment_keywords):
-                on_cart = True  # behandel als succes hieronder
+                on_cart = True
 
         if not on_cart:
             logger.warning("Winkelwagen/betalingspagina niet bereikt. Huidige URL: %s", current_url)
             try:
                 page.screenshot(path="debug_after_checkout.png", full_page=True)
-                logger.info("Debug-screenshot opgeslagen: debug_after_checkout.png")
             except Exception:
                 pass
             return False
 
         logger.info("Winkelwagen bereikt — voorwaarden accepteren en betaallink ophalen...")
 
-        # Stap 4: wacht tot de TOS checkbox geladen is (Livewire laadt asynchroon)
-        # dan aanvinken via JS zodat Alpine.js x-model="accepted" triggert
         tos_checkbox = page.locator("input#tos")
         try:
             tos_checkbox.wait_for(state="visible", timeout=10000)
@@ -688,10 +442,8 @@ class PadelBooker:
             page.wait_for_timeout(1000)
             logger.info("Voorwaarden geaccepteerd")
 
-        # Stap 5: klik "Betaling starten" — navigeert naar betaalprovider
         pay_btn = page.locator('button:has-text("Betaling starten")')
         if pay_btn.count() == 0:
-            # Fallback selectors voor andere betaalknopteksten
             for sel in ['button:has-text("Betalen")', 'button:has-text("Nu betalen")', 'a:has-text("Betalen")']:
                 candidate = page.locator(sel)
                 if candidate.count() > 0 and candidate.first.is_visible():
@@ -701,7 +453,6 @@ class PadelBooker:
         if pay_btn.count() > 0 and pay_btn.first.is_visible():
             logger.info("Betaalknop gevonden, klikken om betaalprovider-URL op te halen...")
             pay_btn.first.click()
-            # reCAPTCHA kan ~6 seconden duren voor navigatie plaatsvindt
             try:
                 page.wait_for_url(
                     lambda url: url != current_url,
@@ -715,59 +466,26 @@ class PadelBooker:
         else:
             logger.warning("Betaalknop niet gevonden — gebruik checkout-URL als fallback")
 
-        # Sla payment URL op in slot_info zodat history hem kan bewaren
         slot_info["payment_url"] = current_url
-
-        # Succes: notificeer en houd browser open
-        notify_booking_available(
-            slot_info["court_name"],
-            slot_info["time_range"],
-            f"{slot_info['club_name']} — {slot_info['club_address']}",
-            current_url,
-        )
-        print("\n" + "=" * 60)
-        print("BOEKING GESLAAGD — WINKELWAGEN BEREIKT")
-        print("=" * 60)
-        print(f"Club:  {slot_info['club_name']}")
-        print(f"Adres: {slot_info['club_address']}")
-        print(f"Baan:  {slot_info['court_name']}")
-        print(f"Tijd:  {slot_info['time_range']}")
-        print(f"URL:   {current_url}")
-        print("=" * 60)
-        print("Script stopt. Rond de betaling zelf af in de browser.")
-        print("=" * 60 + "\n")
-        # Houd browser 30 seconden open zodat de gebruiker kan kijken
-        page.wait_for_timeout(30000)
         return True
 
     # ------------------------------------------------------------------
     # Hoofdflow
     # ------------------------------------------------------------------
 
-    def run(self, headless: bool = True) -> bool:
-        """
-        Voer het volledige boekingsproces uit.
-
-        Returns:
-            True als een tijdslot succesvol geboekt is, anders False.
-        """
+    def run(self) -> ProviderResult:
         logger.info("=" * 60)
-        logger.info("KNLTB Padel Booking Script gestart")
+        logger.info("Meet & Play provider gestart")
         logger.info("=" * 60)
 
-        if self._is_already_booked():
-            logger.info("Script stopt: boeking al aanwezig voor een toekomstige datum.")
-            self._write_last_run(success=True)
-            return True
-
-        weeks_ahead = self.config["booking"].get("weeks_ahead", 4)
+        weeks_ahead = self._booking.get("weeks_ahead", 4)
         booking_dates = self._get_upcoming_booking_dates(count=weeks_ahead)
         logger.info(
             "Zoeken naar tijdsloten voor de komende %d %s-avonden (%s–%s):",
             weeks_ahead,
-            self.config["booking"]["day"],
-            self.config["booking"]["time_start"],
-            self.config["booking"]["time_end"],
+            self._booking["day"],
+            self._booking["time_start"],
+            self._booking["time_end"],
         )
         for d in booking_dates:
             logger.info("  - %s", d.strftime("%d-%m-%Y"))
@@ -778,19 +496,21 @@ class PadelBooker:
         with sync_playwright() as pw:
             self._playwright = pw
             try:
-                browser = pw.chromium.launch(headless=headless)
-                context = self._make_context(browser, headless)
-                context = self._ensure_logged_in(browser, context, headless)
+                browser = pw.chromium.launch(headless=True)
+                context = self._make_context(browser)
+                context = self._ensure_logged_in(browser, context)
 
                 page = context.new_page()
 
-                # Stap 1: zoek clubs in de regio
                 clubs = self._search_clubs(page)
                 if not clubs:
                     logger.warning("Geen clubs gevonden met de opgegeven filters")
-                    return False
+                    return ProviderResult(
+                        success=False,
+                        provider="meetandplay",
+                        error="Geen clubs gevonden",
+                    )
 
-                # Stap 2: probeer per datum en per club een tijdslot te vinden en te boeken
                 for booking_date in booking_dates:
                     date_str = booking_date.strftime("%d-%m-%Y")
                     logger.info("Probeer datum: %s", date_str)
@@ -799,34 +519,51 @@ class PadelBooker:
                             slot_info = self._find_timeslot(page, club, booking_date=booking_date)
                         except Exception as club_err:
                             logger.warning(
-                                "Fout bij %s op %s, volgende club proberen... (%s)",
-                                club["name"], date_str, club_err,
+                                "Fout bij %s op %s: %s", club["name"], date_str, club_err
                             )
                             continue
+
                         if slot_info:
+                            if self._dry_run:
+                                logger.info("Dry-run: tijdslot gevonden maar boeking overgeslagen")
+                                return ProviderResult(
+                                    success=False,
+                                    provider="meetandplay",
+                                    error="dry_run — tijdslot gevonden maar niet geboekt",
+                                )
+
                             success = self._book_timeslot(page, slot_info)
                             if success:
-                                self._save_booking_state(booking_date, slot_info)
-                                self._append_booking_history(booking_date, slot_info)
-                                self._write_last_run(success=True)
-                                return True
+                                return ProviderResult(
+                                    success=True,
+                                    provider="meetandplay",
+                                    booked_date=booking_date.strftime("%Y-%m-%d"),
+                                    slot_info={
+                                        "club_name": slot_info["club_name"],
+                                        "club_address": slot_info["club_address"],
+                                        "court_name": slot_info["court_name"],
+                                        "time_range": slot_info["time_range"],
+                                        "payment_url": slot_info.get("payment_url", ""),
+                                    },
+                                )
                             logger.warning(
                                 "Boeking mislukt bij %s op %s, volgende club proberen...",
                                 club["name"], date_str,
                             )
 
-                logger.warning(
-                    "Geen beschikbaar tijdslot gevonden voor alle %d datum(s) bij alle %d club(s)",
-                    len(booking_dates), len(clubs),
+                return ProviderResult(
+                    success=False,
+                    provider="meetandplay",
+                    error=f"Geen tijdslot gevonden voor {len(booking_dates)} datum(s) bij {len(clubs)} club(s)",
                 )
-                self._write_last_run(success=False)
-                return False
 
             except Exception as e:
-                error_msg = f"Onverwachte fout: {e}"
-                logger.exception(error_msg)
-                self._write_last_run(success=False)
-                return False
+                logger.exception("Onverwachte fout in Meet & Play provider")
+                return ProviderResult(
+                    success=False,
+                    provider="meetandplay",
+                    error=str(e),
+                )
 
             finally:
                 self._playwright = None
@@ -840,39 +577,3 @@ class PadelBooker:
                         browser.close()
                     except Exception:
                         pass
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-def main():
-    load_dotenv()
-
-    headless = "--headed" not in sys.argv and "--no-headless" not in sys.argv
-
-    # Optioneel: verhoog log-level naar DEBUG via --debug vlag
-    if "--debug" in sys.argv:
-        logging.getLogger().setLevel(logging.DEBUG)
-
-    try:
-        booker = PadelBooker()
-        success = booker.run(headless=headless)
-
-        if success:
-            logger.info("Script succesvol uitgevoerd — boeking geïnitieerd")
-            sys.exit(0)
-        else:
-            logger.warning("Script uitgevoerd maar geen boeking gemaakt")
-            sys.exit(1)
-
-    except KeyboardInterrupt:
-        logger.info("Script gestopt door gebruiker (Ctrl+C)")
-        sys.exit(130)
-    except Exception as e:
-        logger.critical("Fatale fout: %s", e, exc_info=True)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
