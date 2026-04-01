@@ -40,6 +40,7 @@ class PlaytomicClient:
         self._token_cache = Path(token_cache_file)
         self._access_token: Optional[str] = None
         self._token_expiry: Optional[datetime] = None
+        self._user_id: Optional[str] = None
         self._session = requests.Session()
         self._session.headers.update(HEADERS)
         self._load_cached_token()
@@ -60,16 +61,18 @@ class PlaytomicClient:
             if expiry > datetime.now(tz=timezone.utc):
                 self._access_token = data["access_token"]
                 self._token_expiry = expiry
+                self._user_id = data.get("user_id")
                 logger.info("Playtomic token geladen uit cache (verloopt %s)", expiry.isoformat())
         except Exception as e:
             logger.debug("Kon token cache niet laden: %s", e)
 
-    def _save_cached_token(self, access_token: str, expiry: datetime) -> None:
+    def _save_cached_token(self, access_token: str, expiry: datetime, user_id: Optional[str] = None) -> None:
         try:
             with open(self._token_cache, "w") as f:
                 json.dump({
                     "access_token": access_token,
                     "expiry": expiry.isoformat(),
+                    "user_id": user_id,
                 }, f)
         except Exception as e:
             logger.warning("Kon token cache niet opslaan: %s", e)
@@ -94,6 +97,7 @@ class PlaytomicClient:
 
         data = resp.json()
         self._access_token = data["access_token"]
+        self._user_id = data.get("user_id")
         expiry_str = data.get("access_token_expiration")
         if expiry_str:
             self._token_expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
@@ -101,8 +105,8 @@ class PlaytomicClient:
             from datetime import timedelta
             self._token_expiry = datetime.now(tz=timezone.utc) + timedelta(hours=1)
 
-        self._save_cached_token(self._access_token, self._token_expiry)
-        logger.info("Playtomic inloggen gelukt (token verloopt %s)", self._token_expiry.isoformat())
+        self._save_cached_token(self._access_token, self._token_expiry, self._user_id)
+        logger.info("Playtomic inloggen gelukt (user_id: %s, token verloopt %s)", self._user_id, self._token_expiry.isoformat())
 
     def _ensure_authenticated(self) -> None:
         if not self._is_token_valid():
@@ -158,6 +162,7 @@ class PlaytomicClient:
         resource_id: str,
         start_time: str,
         duration_minutes: int,
+        number_of_players: int = 4,
     ) -> dict:
         """
         Stap 1 van boeking: maak een payment intent aan.
@@ -165,35 +170,82 @@ class PlaytomicClient:
         Args:
             tenant_id: Playtomic club ID
             resource_id: Court/resource ID
-            start_time: ISO datetime string
+            start_time: ISO datetime string "YYYY-MM-DDTHH:MM:SS"
             duration_minutes: Speelduur in minuten
+            number_of_players: Aantal spelers (standaard 4 voor dubbelspel)
         """
         self._ensure_authenticated()
         payload = {
-            "cart": [{
-                "tenant_id": tenant_id,
-                "resource_id": resource_id,
-                "start_date": start_time,
-                "duration": duration_minutes,
-                "match_type": "PRIVATE",
-            }]
+            "allowed_payment_method_types": [
+                "OFFER", "CASH", "MERCHANT_WALLET", "DIRECT",
+                "SWISH", "IDEAL", "BANCONTACT", "PAYTRAIL",
+                "CREDIT_CARD", "QUICK_PAY",
+            ],
+            "user_id": self._user_id,
+            "cart": {
+                "requested_item": {
+                    "cart_item_type": "CUSTOMER_MATCH",
+                    "cart_item_voucher_id": None,
+                    "cart_item_data": {
+                        "supports_split_payment": True,
+                        "number_of_players": number_of_players,
+                        "tenant_id": tenant_id,
+                        "resource_id": resource_id,
+                        "start": start_time,
+                        "duration": duration_minutes,
+                        "match_registrations": [
+                            {"user_id": self._user_id, "pay_now": True}
+                        ],
+                    },
+                }
+            },
         }
+        logger.debug("Payment intent payload: %s", payload)
         resp = self._session.post(f"{API_BASE}/v1/payment_intents", json=payload)
+        if not resp.ok:
+            try:
+                error_body = resp.json()
+            except Exception:
+                error_body = resp.text
+            logger.warning("Payment intent mislukt (%s) response body: %s", resp.status_code, error_body)
         resp.raise_for_status()
         intent = resp.json()
-        logger.info("Payment intent aangemaakt: %s", intent.get("id"))
+        logger.info("Payment intent aangemaakt: %s", intent.get("payment_intent_id") or intent.get("id"))
         return intent
 
-    def set_payment_method(self, intent_id: str, payment_method: str = "AT_CLUB") -> dict:
+    def set_payment_method(self, intent_id: str, intent_response: Optional[dict] = None) -> dict:
         """
-        Stap 2 van boeking: selecteer betaalmethode.
+        Stap 2 van boeking: selecteer betaalmethode 'betaal ter plaatse'.
 
-        AT_CLUB = betaal ter plaatse (geen online betaling nodig).
+        Leest de beschikbare betaalmethoden uit de intent response en kiest
+        de eerste die 'at the club' / 'cash' / 'merchant_wallet' heet.
+        Valt terug op de eerste beschikbare methode als geen match gevonden.
         """
         self._ensure_authenticated()
+
+        # Bepaal de payment method ID uit de intent response
+        payment_method_id = None
+        if intent_response:
+            methods = intent_response.get("available_payment_methods") or []
+            # Zoek voorkeurs-methoden op naam (betaal ter plaatse)
+            preferred = {"at_the_club", "at the club", "cash", "merchant_wallet", "pay at the club"}
+            for method in methods:
+                name = (method.get("name") or method.get("payment_method_type") or "").lower()
+                if any(p in name for p in preferred):
+                    payment_method_id = method.get("payment_method_id") or method.get("id")
+                    logger.info("Betaalmethode geselecteerd: %s (id: %s)", name, payment_method_id)
+                    break
+            if not payment_method_id and methods:
+                first = methods[0]
+                payment_method_id = first.get("payment_method_id") or first.get("id")
+                logger.info("Geen voorkeursmethode gevonden — eerste methode gebruikt: %s", first.get("name"))
+
         resp = self._session.patch(
             f"{API_BASE}/v1/payment_intents/{intent_id}",
-            json={"payment_method_id": payment_method},
+            json={
+                "selected_payment_method_id": payment_method_id,
+                "selected_payment_method_data": None,
+            },
         )
         resp.raise_for_status()
         return resp.json()
@@ -204,6 +256,12 @@ class PlaytomicClient:
         resp = self._session.post(
             f"{API_BASE}/v1/payment_intents/{intent_id}/confirmation"
         )
+        if not resp.ok:
+            try:
+                error_body = resp.json()
+            except Exception:
+                error_body = resp.text
+            logger.warning("Bevestiging mislukt (%s) response body: %s", resp.status_code, error_body)
         resp.raise_for_status()
         result = resp.json()
         logger.info("Boeking bevestigd via Playtomic: %s", intent_id)

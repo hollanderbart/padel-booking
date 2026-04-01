@@ -1,3 +1,10 @@
+## 2.0.9
+
+- Fix Playtomic boeking 400 Bad Request: payload structuur herschreven naar correcte API formaat (`cart.requested_item.cart_item_data` met `start` i.p.v. `start_date`, `CUSTOMER_MATCH` type, `match_registrations`, `user_id`)
+- Sla `user_id` op in token cache zodat deze hergebruikt wordt zonder opnieuw in te loggen
+- Selecteer betaalmethode dynamisch uit API response i.p.v. hardcoded `AT_CLUB`
+- Log foutresponse body bij 400/500 voor snellere diagnose
+
 ## 2.0.8
 
 - Verbeter slot-filtering logging: elk overgeslagen slot toont nu de reden (buitenbaan, tijdvenster, duur) en het label dat werd gelezen — maakt debuggen van missende slots mogelijk

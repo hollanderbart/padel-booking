@@ -257,9 +257,10 @@ class PlaytomicBooker:
                         start_time=slot_info["start_time"],
                         duration_minutes=slot_info["duration_minutes"],
                     )
-                    intent_id = intent["id"]
+                    # API geeft payment_intent_id of id terug
+                    intent_id = intent.get("payment_intent_id") or intent.get("id")
 
-                    self._client.set_payment_method(intent_id, payment_method="AT_CLUB")
+                    self._client.set_payment_method(intent_id, intent_response=intent)
                     self._client.confirm_booking(intent_id)
 
                     payment_url = f"https://playtomic.io/booking/{intent_id}"

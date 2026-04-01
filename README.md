@@ -15,7 +15,7 @@ Een **orchestrator** coördineert meerdere providers die parallel draaien als lo
 **Playtomic provider** (REST API — geen browser nodig):
 1. Logt in via de Playtomic API met email/wachtwoord
 2. Zoekt clubs in de buurt via coördinaten, gesorteerd op afstand (dichtstbijzijnde eerst)
-3. Haalt beschikbaarheid op en boekt het eerste passende slot
+3. Haalt beschikbaarheid op en boekt het eerste passende slot via de officiële payment intent API
 
 De betaling zelf doe je handmatig via de link in de notificatie. Er worden alleen notificaties gestuurd bij een succesvolle boeking.
 
