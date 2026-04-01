@@ -310,7 +310,8 @@ class TestPlaytomicBookerRun:
         booker = _make_booker(_make_request(weeks_ahead=1))
         booker._client.search_clubs.return_value = [_make_club()]
         booker._client.get_availability.return_value = _make_availability()
-        booker._client.create_payment_intent.return_value = {"id": "intent-123"}
+        # API geeft payment_intent_id terug (nieuwe structuur)
+        booker._client.create_payment_intent.return_value = {"payment_intent_id": "intent-123"}
         booker._client.set_payment_method.return_value = {}
         booker._client.confirm_booking.return_value = {}
 
@@ -321,6 +322,37 @@ class TestPlaytomicBookerRun:
         assert result.booked_date is not None
         assert result.slot_info["club_name"] == "Club A"
         assert "intent-123" in result.slot_info["payment_url"]
+
+    def test_succesvolle_boeking_werkt_ook_met_id_veld(self):
+        # Backwards compat: sommige API versies geven 'id' terug
+        booker = _make_booker(_make_request(weeks_ahead=1))
+        booker._client.search_clubs.return_value = [_make_club()]
+        booker._client.get_availability.return_value = _make_availability()
+        booker._client.create_payment_intent.return_value = {"id": "intent-456"}
+        booker._client.set_payment_method.return_value = {}
+        booker._client.confirm_booking.return_value = {}
+
+        result = booker.run()
+
+        assert result.success is True
+        assert "intent-456" in result.slot_info["payment_url"]
+
+    def test_set_payment_method_ontvangt_intent_response(self):
+        booker = _make_booker(_make_request(weeks_ahead=1))
+        booker._client.search_clubs.return_value = [_make_club()]
+        booker._client.get_availability.return_value = _make_availability()
+        intent_response = {"payment_intent_id": "intent-789", "available_payment_methods": []}
+        booker._client.create_payment_intent.return_value = intent_response
+        booker._client.set_payment_method.return_value = {}
+        booker._client.confirm_booking.return_value = {}
+
+        booker.run()
+
+        # set_payment_method moet de intent response meekrijgen
+        call_kwargs = booker._client.set_payment_method.call_args
+        assert call_kwargs[1].get("intent_response") == intent_response or (
+            len(call_kwargs[0]) >= 2 and call_kwargs[0][1] == intent_response
+        )
 
     def test_booking_fout_gaat_door_naar_volgende_club(self):
         booker = _make_booker(_make_request(weeks_ahead=1))
@@ -339,7 +371,7 @@ class TestPlaytomicBookerRun:
             call_count["n"] += 1
             if call_count["n"] == 1:
                 raise Exception("Boeking mislukt")
-            return {"id": "intent-ok"}
+            return {"payment_intent_id": "intent-ok"}
 
         booker._client.create_payment_intent.side_effect = create_intent
         booker._client.set_payment_method.return_value = {}

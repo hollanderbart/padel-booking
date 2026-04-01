@@ -213,53 +213,154 @@ class TestGetAvailability:
 
 class TestCreatePaymentIntent:
     def test_roept_ensure_authenticated_aan(self, tmp_path):
-        resp = _mock_response(200, {"id": "intent-123"})
+        resp = _mock_response(200, {"payment_intent_id": "intent-123"})
         client = _make_client(tmp_path)
+        client._user_id = "user-1"
         with patch.object(client, "_ensure_authenticated") as mock_auth:
             with patch.object(client._session, "post", return_value=resp):
                 client.create_payment_intent("t1", "r1", "2026-04-10T19:30:00", 90)
         mock_auth.assert_called_once()
 
-    def test_retourneert_intent_met_id(self, tmp_path):
-        resp = _mock_response(200, {"id": "intent-abc"})
+    def test_retourneert_intent_response(self, tmp_path):
+        resp = _mock_response(200, {"payment_intent_id": "intent-abc"})
         client = _make_client(tmp_path)
+        client._user_id = "user-1"
         with patch.object(client, "_ensure_authenticated"):
             with patch.object(client._session, "post", return_value=resp):
                 result = client.create_payment_intent("t1", "r1", "2026-04-10T19:30:00", 90)
-        assert result["id"] == "intent-abc"
+        assert result["payment_intent_id"] == "intent-abc"
 
-    def test_payload_bevat_cart(self, tmp_path):
-        resp = _mock_response(200, {"id": "x"})
+    def test_payload_cart_heeft_juiste_structuur(self, tmp_path):
+        resp = _mock_response(200, {"payment_intent_id": "x"})
         client = _make_client(tmp_path)
+        client._user_id = "user-42"
         with patch.object(client, "_ensure_authenticated"):
             with patch.object(client._session, "post", return_value=resp) as mock_post:
                 client.create_payment_intent("tenant1", "res1", "2026-04-10T19:30:00", 90)
         payload = mock_post.call_args[1]["json"]
         assert "cart" in payload
-        cart = payload["cart"][0]
-        assert cart["tenant_id"] == "tenant1"
-        assert cart["resource_id"] == "res1"
-        assert cart["duration"] == 90
+        cart_data = payload["cart"]["requested_item"]["cart_item_data"]
+        assert cart_data["tenant_id"] == "tenant1"
+        assert cart_data["resource_id"] == "res1"
+        assert cart_data["start"] == "2026-04-10T19:30:00"
+        assert cart_data["duration"] == 90
+
+    def test_payload_bevat_cart_item_type(self, tmp_path):
+        resp = _mock_response(200, {"payment_intent_id": "x"})
+        client = _make_client(tmp_path)
+        client._user_id = "user-1"
+        with patch.object(client, "_ensure_authenticated"):
+            with patch.object(client._session, "post", return_value=resp) as mock_post:
+                client.create_payment_intent("t1", "r1", "2026-04-10T19:30:00", 90)
+        payload = mock_post.call_args[1]["json"]
+        assert payload["cart"]["requested_item"]["cart_item_type"] == "CUSTOMER_MATCH"
+
+    def test_payload_bevat_user_id_op_top_niveau(self, tmp_path):
+        resp = _mock_response(200, {"payment_intent_id": "x"})
+        client = _make_client(tmp_path)
+        client._user_id = "user-xyz"
+        with patch.object(client, "_ensure_authenticated"):
+            with patch.object(client._session, "post", return_value=resp) as mock_post:
+                client.create_payment_intent("t1", "r1", "2026-04-10T19:30:00", 90)
+        payload = mock_post.call_args[1]["json"]
+        assert payload["user_id"] == "user-xyz"
+
+    def test_payload_bevat_match_registrations(self, tmp_path):
+        resp = _mock_response(200, {"payment_intent_id": "x"})
+        client = _make_client(tmp_path)
+        client._user_id = "user-abc"
+        with patch.object(client, "_ensure_authenticated"):
+            with patch.object(client._session, "post", return_value=resp) as mock_post:
+                client.create_payment_intent("t1", "r1", "2026-04-10T19:30:00", 90)
+        payload = mock_post.call_args[1]["json"]
+        registrations = payload["cart"]["requested_item"]["cart_item_data"]["match_registrations"]
+        assert len(registrations) >= 1
+        assert registrations[0]["user_id"] == "user-abc"
+
+    def test_payload_bevat_allowed_payment_methods(self, tmp_path):
+        resp = _mock_response(200, {"payment_intent_id": "x"})
+        client = _make_client(tmp_path)
+        client._user_id = "user-1"
+        with patch.object(client, "_ensure_authenticated"):
+            with patch.object(client._session, "post", return_value=resp) as mock_post:
+                client.create_payment_intent("t1", "r1", "2026-04-10T19:30:00", 90)
+        payload = mock_post.call_args[1]["json"]
+        assert "allowed_payment_method_types" in payload
+        assert len(payload["allowed_payment_method_types"]) > 0
+
+    def test_400_logt_response_body(self, tmp_path, caplog):
+        import logging
+        resp = _mock_response(400)
+        resp.json.return_value = {"error": "invalid_payload", "detail": "start is required"}
+        resp.ok = False
+        client = _make_client(tmp_path)
+        client._user_id = "user-1"
+        with patch.object(client, "_ensure_authenticated"):
+            with patch.object(client._session, "post", return_value=resp):
+                with caplog.at_level(logging.WARNING):
+                    with pytest.raises(Exception):
+                        client.create_payment_intent("t1", "r1", "2026-04-10T19:30:00", 90)
+        assert any("400" in r.message or "invalid_payload" in r.message for r in caplog.records)
+
+    def test_aangepast_aantal_spelers(self, tmp_path):
+        resp = _mock_response(200, {"payment_intent_id": "x"})
+        client = _make_client(tmp_path)
+        client._user_id = "user-1"
+        with patch.object(client, "_ensure_authenticated"):
+            with patch.object(client._session, "post", return_value=resp) as mock_post:
+                client.create_payment_intent("t1", "r1", "2026-04-10T19:30:00", 90, number_of_players=2)
+        payload = mock_post.call_args[1]["json"]
+        assert payload["cart"]["requested_item"]["cart_item_data"]["number_of_players"] == 2
 
 
 class TestSetPaymentMethod:
-    def test_standaard_betaalmethode_is_at_club(self, tmp_path):
-        resp = _mock_response(200, {"id": "intent-1"})
+    def test_gebruikt_selected_payment_method_id_key(self, tmp_path):
+        resp = _mock_response(200, {})
         client = _make_client(tmp_path)
         with patch.object(client, "_ensure_authenticated"):
             with patch.object(client._session, "patch", return_value=resp) as mock_patch:
                 client.set_payment_method("intent-1")
         payload = mock_patch.call_args[1]["json"]
-        assert payload["payment_method_id"] == "AT_CLUB"
+        assert "selected_payment_method_id" in payload
 
-    def test_aangepaste_betaalmethode_wordt_doorgestuurd(self, tmp_path):
+    def test_selecteert_at_the_club_methode_uit_intent_response(self, tmp_path):
+        resp = _mock_response(200, {})
+        client = _make_client(tmp_path)
+        intent_response = {
+            "available_payment_methods": [
+                {"payment_method_id": "pm-cash", "name": "At the club"},
+                {"payment_method_id": "pm-card", "name": "Credit card"},
+            ]
+        }
+        with patch.object(client, "_ensure_authenticated"):
+            with patch.object(client._session, "patch", return_value=resp) as mock_patch:
+                client.set_payment_method("intent-1", intent_response=intent_response)
+        payload = mock_patch.call_args[1]["json"]
+        assert payload["selected_payment_method_id"] == "pm-cash"
+
+    def test_valt_terug_op_eerste_methode_als_geen_voorkeur_gevonden(self, tmp_path):
+        resp = _mock_response(200, {})
+        client = _make_client(tmp_path)
+        intent_response = {
+            "available_payment_methods": [
+                {"payment_method_id": "pm-ideal", "name": "iDEAL"},
+                {"payment_method_id": "pm-card", "name": "Credit card"},
+            ]
+        }
+        with patch.object(client, "_ensure_authenticated"):
+            with patch.object(client._session, "patch", return_value=resp) as mock_patch:
+                client.set_payment_method("intent-1", intent_response=intent_response)
+        payload = mock_patch.call_args[1]["json"]
+        assert payload["selected_payment_method_id"] == "pm-ideal"
+
+    def test_zonder_intent_response_stuurt_none_als_method_id(self, tmp_path):
         resp = _mock_response(200, {})
         client = _make_client(tmp_path)
         with patch.object(client, "_ensure_authenticated"):
             with patch.object(client._session, "patch", return_value=resp) as mock_patch:
-                client.set_payment_method("intent-1", payment_method="ONLINE")
+                client.set_payment_method("intent-1")
         payload = mock_patch.call_args[1]["json"]
-        assert payload["payment_method_id"] == "ONLINE"
+        assert payload["selected_payment_method_id"] is None
 
 
 class TestConfirmBooking:
