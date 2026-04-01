@@ -110,6 +110,73 @@ Of voeg dit toe aan `automations.yaml`:
 
 ---
 
+## Toekomstige boekingen in Home Assistant
+
+Na elke run haalt het script live de toekomstige reserveringen op van beide accounts (Playtomic via de API, Meet & Play via de `mijn-reserveringen` pagina) en schrijft ze naar `/config/padel/future_bookings.json`. Je kunt deze weergeven in een Lovelace dashboard.
+
+### Stap 1 — Voeg de sensor toe aan `configuration.yaml`
+
+```yaml
+command_line:
+  - sensor:
+      name: Padel Future Bookings
+      unique_id: padel_future_bookings
+      command: "cat /config/padel/future_bookings.json 2>/dev/null || echo '[]'"
+      value_template: "{{ value_json | length }} aankomende boeking(en)"
+      json_attributes_template: >
+        {{ {"bookings": value_json} | tojson }}
+      scan_interval: 300
+```
+
+Herstart daarna Home Assistant (of ga naar **Developer Tools → YAML → Reload command_line entities**).
+
+### Stap 2 — Voeg de Lovelace card toe
+
+```yaml
+type: markdown
+title: Aankomende padel boekingen
+content: >
+  {% set bookings = state_attr('sensor.padel_future_bookings', 'bookings') %}
+  {% if bookings and bookings | length > 0 %}
+  | Datum | Club | Baan | Tijd | Via |
+  |-------|------|------|------|-----|
+  {% for b in bookings %}
+  | {{ b.booked_date }} | {{ b.club_name }} | {{ b.court_name }} | {{ b.time_range }} | {{ b.provider }} |
+  {% endfor %}
+  {% else %}
+  *Geen aankomende boekingen gevonden.*
+  {% endif %}
+```
+
+### Formaat van `future_bookings.json`
+
+```json
+[
+  {
+    "booked_date": "2026-04-10",
+    "provider": "meetandplay",
+    "club_name": "Sportcentrum Boskoop",
+    "club_address": "",
+    "court_name": "Padelbaan 2",
+    "time_range": "19:30 - 21:00",
+    "payment_url": "https://...",
+    "status": "confirmed"
+  },
+  {
+    "booked_date": "2026-04-17",
+    "provider": "playtomic",
+    "club_name": "Padelclub X",
+    "club_address": "...",
+    "court_name": "Padelbaan",
+    "time_range": "20:00 - 21:30",
+    "payment_url": "https://playtomic.io/booking/...",
+    "status": "confirmed"
+  }
+]
+```
+
+---
+
 ## Boekingsgeschiedenis in Home Assistant
 
 Na elke succesvolle boeking schrijft het script een entry naar `/config/padel/booking_history.json`. Je kunt de geschiedenis weergeven in een Lovelace dashboard via een `command_line` sensor.

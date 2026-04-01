@@ -21,3 +21,6 @@ python orchestrator.py --debug
     cp /data/.meetandplay_cookies.json /config/padel/.meetandplay_cookies.json
 [ -f /data/.playtomic_token.json ] && \
     cp /data/.playtomic_token.json /config/padel/.playtomic_token.json
+
+# Haal toekomstige boekingen op en schrijf naar /config/padel/future_bookings.json
+python fetch_bookings.py --output /config/padel/future_bookings.json || true

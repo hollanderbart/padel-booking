@@ -1,3 +1,9 @@
+## 2.1.0
+
+- Voeg `fetch_bookings.py` toe: haalt live toekomstige boekingen op van beide accounts (Playtomic via `/v1/matches` API, Meet & Play via scraping van `mijn-reserveringen`)
+- Schrijft resultaat naar `/config/padel/future_bookings.json` na elke run
+- Voeg `command_line` sensor en Lovelace card toe voor weergave in dashboard
+
 ## 2.0.9
 
 - Fix Playtomic boeking 400 Bad Request: payload structuur herschreven naar correcte API formaat (`cart.requested_item.cart_item_data` met `start` i.p.v. `start_date`, `CUSTOMER_MATCH` type, `match_registrations`, `user_id`)
