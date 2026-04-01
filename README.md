@@ -257,6 +257,21 @@ Bij de upgrade van v1 (knltb_padel_booking) naar v2 (padel_booking) moet je:
 - Controleer `playtomic_email` en `playtomic_password`
 - Als je Playtomic account via Google/Apple SSO is aangemaakt, stel dan eerst een wachtwoord in via "Wachtwoord vergeten" op playtomic.io
 
+### Script vindt geen banen terwijl er wel slots beschikbaar zijn
+
+Elk overgeslagen slot wordt nu gelogd met de reden. Zoek in de HA log naar regels als:
+
+```
+Slot 3 overgeslagen: tijd 19:30 buiten venster 20:00–21:00 (label: 'Dubbelspel binnenbaan')
+Slot 5 overgeslagen: duur 60 min ≠ gewenste 90 min (tijd: 19:30, label: '')
+Slot 7 overgeslagen: buitenbaan ('Buitenbaan dubbelspel')
+```
+
+Mogelijke oorzaken:
+- **Tijdvenster te smal**: het slot valt net buiten `booking_time_start`–`booking_time_end`
+- **Duur mismatch**: de site toont bijv. "60 min" maar `duration_minutes` staat op `90`
+- **Buitenbaan filter**: het label van het slot bevat "buiten" terwijl `court_type=indoor`
+
 ### Script vindt geen banen
 
 - Er zijn geen banen beschikbaar in het opgegeven tijdvenster
