@@ -1,3 +1,7 @@
+## 2.0.1
+
+- Fix: Docker build mislukte omdat providers/ en orchestrator.py niet beschikbaar waren in de addon build context; gesynchroniseerde kopieën toegevoegd aan padel_booking/
+
 ## 2.0.0
 
 - Herstructurering naar provider/orchestrator architectuur
