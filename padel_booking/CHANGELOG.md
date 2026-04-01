@@ -1,3 +1,7 @@
+## 2.1.1
+
+- Fix: Playtomic boeking mislukt met `can't compare offset-naive and offset-aware datetimes` — token expiry uit API-response zonder timezone-info wordt nu altijd als UTC behandeld (zelfde fix als in `_load_cached_token`)
+
 ## 2.1.0
 
 - Voeg `fetch_bookings.py` toe: haalt live toekomstige boekingen op van beide accounts (Playtomic via `/v1/matches` API, Meet & Play via scraping van `mijn-reserveringen`)

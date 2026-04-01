@@ -100,7 +100,10 @@ class PlaytomicClient:
         self._user_id = data.get("user_id")
         expiry_str = data.get("access_token_expiration")
         if expiry_str:
-            self._token_expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
+            expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            self._token_expiry = expiry
         else:
             from datetime import timedelta
             self._token_expiry = datetime.now(tz=timezone.utc) + timedelta(hours=1)
