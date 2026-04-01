@@ -22,16 +22,20 @@ Gebruik [semantic versioning](https://semver.org/):
 ### Workflow bij een aanpassing
 
 1. Maak de wijziging in de bronbestanden in de repo root
-2. Verhoog het versienummer in `padel_booking/config.yaml`
-3. **Voeg een entry toe aan `padel_booking/CHANGELOG.md`** met het nieuwe versienummer en een beknopte beschrijving van de wijzigingen (nieuwste versie bovenaan)
-4. **Update altijd `README.md`** — bij elke aanpassing, ook kleine (zie sectie hieronder voor wat er in de README hoort)
-5. Commit en push naar `main` — **doe dit altijd zonder te vragen**
-6. In HA: **Settings → Add-ons → Padel Booking → ⋮ → Check for updates → Update**
+2. **Sync gewijzigde bestanden naar `padel_booking/`** — de Dockerfile gebruikt de addon-directory als build context:
+   - `orchestrator.py` → `padel_booking/orchestrator.py`
+   - `notify.py` → `padel_booking/notify.py`
+   - `providers/` → `padel_booking/providers/`
+3. Verhoog het versienummer in `padel_booking/config.yaml`
+4. **Voeg een entry toe aan `padel_booking/CHANGELOG.md`** met het nieuwe versienummer en een beknopte beschrijving van de wijzigingen (nieuwste versie bovenaan)
+5. **Update altijd `README.md`** — bij elke aanpassing, ook kleine (zie sectie hieronder voor wat er in de README hoort)
+6. Commit en push naar `main` — **doe dit altijd zonder te vragen**
+7. In HA: **Settings → Add-ons → Padel Booking → ⋮ → Check for updates → Update**
 
 > **Claude**: commit en push altijd automatisch na een aanpassing. Vraag hier niet om toestemming voor.
 > **Claude**: werk altijd direct op de `main` branch. Maak geen feature branches. Push altijd naar `origin/main`.
 
-**Let op**: Er zijn geen gesynchroniseerde kopieën meer van Python-bestanden in `padel_booking/`. De Dockerfile kopieert de `providers/` map en `orchestrator.py` direct vanuit de repo root.
+**Let op**: De Dockerfile gebruikt de `padel_booking/` directory als build context (HA-beperking). Daardoor moeten `orchestrator.py`, `notify.py` en `providers/` gesynchroniseerd worden naar `padel_booking/`. Pas altijd eerst de bronbestanden in de repo root aan en sync daarna.
 
 ## README bijhouden
 
