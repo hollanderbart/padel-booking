@@ -1,3 +1,9 @@
+## 2.0.3
+
+- Fix Playtomic slot matching: UTC tijden worden nu correct naar lokale tijd geconverteerd (zomertijd/wintertijd)
+- Fix Playtomic duration check: API geeft duur soms in seconden, wordt automatisch herkend en omgezet naar minuten
+- Voeg debug logging toe voor slot-tijden zodat mismatches zichtbaar zijn in de log
+
 ## 2.0.2
 
 - Playtomic email en wachtwoord naar boven in de configuratie UI verplaatst

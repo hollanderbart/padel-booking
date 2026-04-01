@@ -104,16 +104,27 @@ class PlaytomicBooker:
 
             try:
                 slot_dt = datetime.fromisoformat(slot_start_str.replace("Z", "+00:00"))
-                # Converteer naar lokale tijd voor vergelijking
-                slot_local = slot_dt.replace(tzinfo=None)
-                slot_minutes = slot_local.hour * 60 + slot_local.minute
+                # Converteer UTC naar lokale tijd
+                import time as _time
+                utc_offset_seconds = -_time.timezone if not _time.daylight else -_time.altzone
+                from datetime import timezone as _tz, timedelta as _td
+                local_dt = slot_dt.astimezone(_tz(offset=_td(seconds=utc_offset_seconds)))
+                slot_minutes = local_dt.hour * 60 + local_dt.minute
             except Exception:
                 continue
+
+            logger.debug(
+                "Slot: %s → lokaal %02d:%02d, duur=%s",
+                slot_start_str, slot_minutes // 60, slot_minutes % 60, slot.get("duration")
+            )
 
             if not (window_start <= slot_minutes < window_end):
                 continue
 
+            # duration kan in minuten of seconden zijn afhankelijk van de API respons
             slot_duration = slot.get("duration", 0)
+            if slot_duration == duration_minutes * 60:
+                slot_duration = duration_minutes  # converteer seconden naar minuten
             if slot_duration != duration_minutes:
                 continue
 
