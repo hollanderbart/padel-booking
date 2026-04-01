@@ -158,11 +158,15 @@ async def run_provider(name: str, request: dict, debug: bool) -> dict:
         input_data = json.dumps(request).encode()
         stdout, stderr = await proc.communicate(input=input_data)
 
-        # Log provider stderr — INFO zodat het altijd zichtbaar is in de HA log
+        # Log provider stderr — strip de eigen timestamp/level prefix van de provider
+        # zodat er geen dubbele "INFO [x] 2026-... INFO [x] ..." regels ontstaan
         if stderr:
             for line in stderr.decode(errors="replace").splitlines():
                 if line.strip():
-                    logger.info("[%s] %s", name, line)
+                    # Verwijder de timestamp+level prefix als die aanwezig is (provider logt die zelf al)
+                    import re as _re
+                    clean = _re.sub(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+\w+\s+", "", line)
+                    logger.info(clean)
 
         if not stdout.strip():
             logger.warning("Provider '%s' gaf geen output (exit code: %s)", name, proc.returncode)

@@ -1,3 +1,8 @@
+## 2.0.5
+
+- Fix Playtomic slot parsing: API response is genest per court (`slots` array met `start_time`/`duration`), niet plat per slot
+- Fix dubbele logging: provider timestamp+level prefix wordt gestript zodat de HA log leesbaar blijft
+
 ## 2.0.4
 
 - Fix: provider stderr altijd zichtbaar in HA log (was alleen op DEBUG level)

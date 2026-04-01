@@ -97,53 +97,50 @@ class PlaytomicBooker:
         window_start = start_h * 60 + start_m
         window_end = end_h * 60 + end_m
 
-        for slot in slots:
-            slot_start_str = slot.get("start_date", "")
-            if not slot_start_str:
-                continue
+        # Response structuur: lijst van court-objecten, elk met:
+        #   { "resource_id": "...", "start_date": "YYYY-MM-DD", "slots": [{"start_time": "HH:MM:SS", "duration": 90}, ...] }
+        for court in slots:
+            resource_id = court.get("resource_id", "")
+            start_date = court.get("start_date", "")  # "YYYY-MM-DD"
 
-            try:
-                slot_dt = datetime.fromisoformat(slot_start_str.replace("Z", "+00:00"))
-                # Converteer UTC naar lokale tijd
-                import time as _time
-                utc_offset_seconds = -_time.timezone if not _time.daylight else -_time.altzone
-                from datetime import timezone as _tz, timedelta as _td
-                local_dt = slot_dt.astimezone(_tz(offset=_td(seconds=utc_offset_seconds)))
-                slot_minutes = local_dt.hour * 60 + local_dt.minute
-            except Exception:
-                continue
+            for slot in court.get("slots", []):
+                start_time = slot.get("start_time", "")  # "HH:MM:SS"
+                if not start_time:
+                    continue
 
-            logger.debug(
-                "Slot: %s → lokaal %02d:%02d, duur=%s",
-                slot_start_str, slot_minutes // 60, slot_minutes % 60, slot.get("duration")
-            )
+                try:
+                    h, m, _ = start_time.split(":")
+                    slot_minutes = int(h) * 60 + int(m)
+                except Exception:
+                    continue
 
-            if not (window_start <= slot_minutes < window_end):
-                continue
+                slot_duration = slot.get("duration", 0)
 
-            # duration kan in minuten of seconden zijn afhankelijk van de API respons
-            slot_duration = slot.get("duration", 0)
-            if slot_duration == duration_minutes * 60:
-                slot_duration = duration_minutes  # converteer seconden naar minuten
-            if slot_duration != duration_minutes:
-                continue
+                logger.debug(
+                    "Slot: %s %s → %02d:%02d, duur=%s min",
+                    start_date, start_time, slot_minutes // 60, slot_minutes % 60, slot_duration
+                )
 
-            resource_id = slot.get("resource_id", "")
-            resource_name = slot.get("resource_name", "Court")
+                if not (window_start <= slot_minutes < window_end):
+                    continue
 
-            logger.info(
-                "Playtomic slot gevonden: %s om %s (baan: %s)",
-                tenant.get("tenant_name"), slot_start_str, resource_name
-            )
-            return {
-                "tenant_id": tenant_id,
-                "tenant_name": tenant.get("tenant_name", ""),
-                "tenant_address": tenant.get("address", {}).get("full_address", ""),
-                "resource_id": resource_id,
-                "resource_name": resource_name,
-                "start_time": slot_start_str,
-                "duration_minutes": duration_minutes,
-            }
+                if slot_duration != duration_minutes:
+                    continue
+
+                full_start = f"{start_date}T{start_time}"
+                logger.info(
+                    "Playtomic slot gevonden: %s om %s (resource: %s)",
+                    tenant.get("tenant_name"), full_start, resource_id
+                )
+                return {
+                    "tenant_id": tenant_id,
+                    "tenant_name": tenant.get("tenant_name", ""),
+                    "tenant_address": tenant.get("address", {}).get("full_address", ""),
+                    "resource_id": resource_id,
+                    "resource_name": "Padelbaan",
+                    "start_time": full_start,
+                    "duration_minutes": duration_minutes,
+                }
 
         return None
 
