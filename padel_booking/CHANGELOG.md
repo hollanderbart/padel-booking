@@ -1,3 +1,7 @@
+## 2.0.8
+
+- Verbeter slot-filtering logging: elk overgeslagen slot toont nu de reden (buitenbaan, tijdvenster, duur) en het label dat werd gelezen — maakt debuggen van missende slots mogelijk
+
 ## 2.0.7
 
 - Voeg uitgebreide unit tests toe: 147 tests voor alle modules (orchestrator, notify, base, Playtomic client/booker, MeetAndPlay booker/session)

@@ -283,10 +283,13 @@ class MeetAndPlayBooker:
                 court_type_label = ""
 
             if court_type == "indoor" and "buiten" in court_type_label:
+                logger.info("Slot %d overgeslagen: buitenbaan (%r)", i, court_type_label)
                 continue
             if game_type == "double" and "enkelspel" in court_type_label:
+                logger.info("Slot %d overgeslagen: enkelspel (%r)", i, court_type_label)
                 continue
             if game_type == "single" and "dubbelspel" in court_type_label:
+                logger.info("Slot %d overgeslagen: dubbelspel (%r)", i, court_type_label)
                 continue
 
             try:
@@ -296,19 +299,23 @@ class MeetAndPlayBooker:
                 sh, sm = map(int, slot_start_str.split(":"))
                 slot_start_min = sh * 60 + sm
             except Exception as e:
-                logger.debug("Kon tijdslot-tijd niet lezen: %s", e)
+                logger.info("Slot %d overgeslagen: kon tijd niet lezen: %s", i, e)
                 continue
 
             if not (start_minutes <= slot_start_min < end_minutes):
+                logger.info(
+                    "Slot %d overgeslagen: tijd %s buiten venster %s–%s (label: %r)",
+                    i, slot_start_str, time_start, time_end, court_type_label
+                )
                 continue
 
             duration_match = re.search(r"(\d+)\s*min", time_text, re.IGNORECASE)
             if duration_match:
                 slot_duration = int(duration_match.group(1))
                 if slot_duration != duration_minutes:
-                    logger.debug(
-                        "Tijdslot om %s overgeslagen: duur %d min ≠ gewenste %d min",
-                        slot_start_str, slot_duration, duration_minutes
+                    logger.info(
+                        "Slot %d overgeslagen: duur %d min ≠ gewenste %d min (tijd: %s, label: %r)",
+                        i, slot_duration, duration_minutes, slot_start_str, court_type_label
                     )
                     continue
 
