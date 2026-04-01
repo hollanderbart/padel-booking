@@ -247,6 +247,19 @@ class TestFindTimeslotFilters:
         result = booker._find_timeslot(page, club)
         assert result is None
 
+    def test_buiten_label_logt_reden(self, caplog):
+        import logging
+        booker = _make_booker(_make_request(court_type="indoor"))
+        slot = self._make_slot_mock(court_label="Buitenbaan dubbelspel", time_text="19:30\n90 min")
+        page = self._make_page_with_slots([slot])
+        club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
+
+        with caplog.at_level(logging.INFO):
+            booker._find_timeslot(page, club)
+
+        assert any("buitenbaan" in r.message.lower() for r in caplog.records)
+        assert any("buitenbaan dubbelspel" in r.message.lower() for r in caplog.records)
+
     def test_enkelspel_wordt_overgeslagen_voor_dubbelspel(self):
         booker = _make_booker(_make_request(game_type="double"))
         slot = self._make_slot_mock(court_label="Enkelspel", time_text="19:30\n90 min")
@@ -255,6 +268,18 @@ class TestFindTimeslotFilters:
 
         result = booker._find_timeslot(page, club)
         assert result is None
+
+    def test_enkelspel_logt_reden(self, caplog):
+        import logging
+        booker = _make_booker(_make_request(game_type="double"))
+        slot = self._make_slot_mock(court_label="Enkelspel binnenbaan", time_text="19:30\n90 min")
+        page = self._make_page_with_slots([slot])
+        club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
+
+        with caplog.at_level(logging.INFO):
+            booker._find_timeslot(page, club)
+
+        assert any("enkelspel" in r.message.lower() for r in caplog.records)
 
     def test_dubbelspel_wordt_overgeslagen_voor_enkelspel(self):
         booker = _make_booker(_make_request(game_type="single"))
@@ -265,9 +290,55 @@ class TestFindTimeslotFilters:
         result = booker._find_timeslot(page, club)
         assert result is None
 
+    def test_dubbelspel_logt_reden(self, caplog):
+        import logging
+        booker = _make_booker(_make_request(game_type="single"))
+        slot = self._make_slot_mock(court_label="Dubbelspel binnenbaan", time_text="19:30\n90 min")
+        page = self._make_page_with_slots([slot])
+        club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
+
+        with caplog.at_level(logging.INFO):
+            booker._find_timeslot(page, club)
+
+        assert any("dubbelspel" in r.message.lower() for r in caplog.records)
+
     def test_slot_buiten_tijdvenster_wordt_overgeslagen(self):
         booker = _make_booker(_make_request(time_start="19:30", time_end="21:00"))
         slot = self._make_slot_mock(time_text="21:30\n90 min")
+        page = self._make_page_with_slots([slot])
+        club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
+
+        result = booker._find_timeslot(page, club)
+        assert result is None
+
+    def test_slot_buiten_tijdvenster_logt_tijd_en_venster(self, caplog):
+        import logging
+        booker = _make_booker(_make_request(time_start="19:30", time_end="21:00"))
+        slot = self._make_slot_mock(time_text="21:30\n90 min")
+        page = self._make_page_with_slots([slot])
+        club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
+
+        with caplog.at_level(logging.INFO):
+            booker._find_timeslot(page, club)
+
+        assert any(
+            "21:30" in r.message and "19:30" in r.message and "21:00" in r.message
+            for r in caplog.records
+        )
+
+    def test_slot_voor_venster_wordt_overgeslagen(self):
+        booker = _make_booker(_make_request(time_start="19:30", time_end="21:00"))
+        slot = self._make_slot_mock(time_text="18:00\n90 min")
+        page = self._make_page_with_slots([slot])
+        club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
+
+        result = booker._find_timeslot(page, club)
+        assert result is None
+
+    def test_slot_precies_op_eindtijd_wordt_overgeslagen(self):
+        # 21:00 is exclusief
+        booker = _make_booker(_make_request(time_start="19:30", time_end="21:00", duration=90))
+        slot = self._make_slot_mock(time_text="21:00\n90 min")
         page = self._make_page_with_slots([slot])
         club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
 
@@ -283,6 +354,31 @@ class TestFindTimeslotFilters:
         result = booker._find_timeslot(page, club)
         assert result is None
 
+    def test_verkeerde_duur_logt_gevonden_en_gewenste_duur(self, caplog):
+        import logging
+        booker = _make_booker(_make_request(time_start="19:30", time_end="21:00", duration=90))
+        slot = self._make_slot_mock(time_text="19:30\n60 min")
+        page = self._make_page_with_slots([slot])
+        club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
+
+        with caplog.at_level(logging.INFO):
+            booker._find_timeslot(page, club)
+
+        assert any("60" in r.message and "90" in r.message for r in caplog.records)
+
+    def test_logberichten_bevatten_slotnummer(self, caplog):
+        import logging
+        booker = _make_booker(_make_request(court_type="indoor"))
+        slot = self._make_slot_mock(court_label="Buitenbaan", time_text="19:30\n90 min")
+        page = self._make_page_with_slots([slot])
+        club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
+
+        with caplog.at_level(logging.INFO):
+            booker._find_timeslot(page, club)
+
+        # Slotnummer 0 moet in het bericht staan
+        assert any("0" in r.message for r in caplog.records if "overgeslagen" in r.message.lower())
+
     def test_geen_slots_retourneert_none(self):
         booker = _make_booker()
         page = self._make_page_with_slots([])
@@ -290,6 +386,19 @@ class TestFindTimeslotFilters:
 
         result = booker._find_timeslot(page, club)
         assert result is None
+
+    def test_meerdere_slots_eerste_geldig_wordt_gekozen(self):
+        booker = _make_booker(_make_request(time_start="19:30", time_end="21:00", duration=90))
+        # Slot 0: buitenbaan — wordt overgeslagen
+        # Slot 1: juiste tijd + duur — wordt gevonden
+        slot_buiten = self._make_slot_mock(court_label="Buitenbaan", time_text="19:30\n90 min", slot_id="skip")
+        slot_ok = self._make_slot_mock(court_label="Binnenbaan", time_text="19:30\n– 21:00\n90 min", slot_id="found-1")
+        page = self._make_page_with_slots([slot_buiten, slot_ok])
+        club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
+
+        result = booker._find_timeslot(page, club)
+        assert result is not None
+        assert result["slot_id"] == "found-1"
 
 
 # ---------------------------------------------------------------------------
