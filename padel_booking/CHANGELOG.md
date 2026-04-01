@@ -1,3 +1,8 @@
+## 2.0.7
+
+- Voeg uitgebreide unit tests toe: 147 tests voor alle modules (orchestrator, notify, base, Playtomic client/booker, MeetAndPlay booker/session)
+- Voeg pytest.ini toe met asyncio_mode=auto en pytest-asyncio dependency
+
 ## 2.0.6
 
 - Fix: Playtomic token vergelijking met tijdzone faalt niet meer (`can't compare offset-naive and offset-aware datetimes`)

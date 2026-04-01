@@ -205,6 +205,25 @@ python orchestrator.py --dry-run
 echo '{"booking_request":{"location":{"city":"Boskoop","radius_km":20},"day":"thursday","time_start":"19:30","time_end":"21:00","duration_minutes":90,"court_type":"indoor","game_type":"double","weeks_ahead":4},"credentials":{"email":"...","password":"..."},"provider_config":{"cookies_file":".meetandplay_cookies.json"},"dry_run":true}' | python -m providers.meetandplay.provider
 ```
 
+### Unit tests uitvoeren
+
+```bash
+# Alle unit tests (geen credentials of browser nodig)
+pytest tests/ -v
+
+# Inclusief de integratie test (vereist KNLTB_EMAIL en KNLTB_PASSWORD in .env)
+pytest tests/ test_integration.py -v
+```
+
+De `tests/` map bevat 147 tests voor alle modules:
+- `test_orchestrator.py` — deduplicatie, state/history, provider subprocess, first-wins logica
+- `test_base.py` — ProviderResult JSON contract
+- `test_notify.py` — HA push, macOS, console notificaties
+- `test_playtomic_client.py` — REST API client, token caching, auth
+- `test_playtomic_booking.py` — slot zoeken, afstandssortering, boekingsflow
+- `test_meetandplay_booking.py` — slot filters, login, Playwright mocks
+- `test_session.py` — cookie/sessie beheer
+
 ### Via Docker
 
 ```bash
