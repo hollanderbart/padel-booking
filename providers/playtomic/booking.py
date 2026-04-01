@@ -4,6 +4,7 @@ Gebruikt de Playtomic REST API — geen browser nodig.
 """
 
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -65,6 +66,45 @@ class PlaytomicBooker:
 
         first_date = today + timedelta(days=days_ahead)
         return [first_date + timedelta(weeks=i) for i in range(count)]
+
+    # ------------------------------------------------------------------
+    # Afstandsberekening
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Berekent de afstand in km tussen twee coördinaten (Haversine formule)."""
+        R = 6371.0
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+        return R * 2 * math.asin(math.sqrt(a))
+
+    def _sort_clubs_by_distance(self, clubs: list, origin_lat: float, origin_lon: float) -> list:
+        """Sorteert clubs op afstand van de opgegeven locatie (dichtstbijzijnde eerst)."""
+        def distance(club: dict) -> float:
+            geo = club.get("address", {}).get("geo_location") or club.get("geo_location") or {}
+            try:
+                lat = float(geo.get("lat") or geo.get("latitude") or 0)
+                lon = float(geo.get("lon") or geo.get("longitude") or 0)
+                if lat == 0 and lon == 0:
+                    return float("inf")
+                return self._haversine_km(origin_lat, origin_lon, lat, lon)
+            except Exception:
+                return float("inf")
+
+        sorted_clubs = sorted(clubs, key=distance)
+        for club in sorted_clubs:
+            geo = club.get("address", {}).get("geo_location") or club.get("geo_location") or {}
+            try:
+                lat = float(geo.get("lat") or geo.get("latitude") or 0)
+                lon = float(geo.get("lon") or geo.get("longitude") or 0)
+                d = self._haversine_km(origin_lat, origin_lon, lat, lon) if lat and lon else None
+                dist_str = f"{d:.1f} km" if d is not None else "onbekend"
+            except Exception:
+                dist_str = "onbekend"
+            logger.debug("Club: %s — %s", club.get("tenant_name", "?"), dist_str)
+        return sorted_clubs
 
     # ------------------------------------------------------------------
     # Slot zoeken
@@ -191,6 +231,7 @@ class PlaytomicBooker:
             )
 
         logger.info("%d Playtomic club(s) gevonden", len(clubs))
+        clubs = self._sort_clubs_by_distance(clubs, lat, lon)
 
         for booking_date in booking_dates:
             date_str = booking_date.strftime("%d-%m-%Y")

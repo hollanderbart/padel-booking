@@ -55,6 +55,8 @@ class PlaytomicClient:
             with open(self._token_cache) as f:
                 data = json.load(f)
             expiry = datetime.fromisoformat(data["expiry"])
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
             if expiry > datetime.now(tz=timezone.utc):
                 self._access_token = data["access_token"]
                 self._token_expiry = expiry

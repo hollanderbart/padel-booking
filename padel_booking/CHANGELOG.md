@@ -1,3 +1,8 @@
+## 2.0.6
+
+- Fix: Playtomic token vergelijking met tijdzone faalt niet meer (`can't compare offset-naive and offset-aware datetimes`)
+- Sorteer Playtomic clubs op afstand zodat de dichtstbijzijnde club altijd als eerste geprobeerd wordt
+
 ## 2.0.5
 
 - Fix Playtomic slot parsing: API response is genest per court (`slots` array met `start_time`/`duration`), niet plat per slot
