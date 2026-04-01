@@ -31,6 +31,10 @@ class PlaytomicAuthError(Exception):
     pass
 
 
+class NoSuitablePaymentMethodError(Exception):
+    pass
+
+
 class PlaytomicClient:
     """REST API client voor Playtomic."""
 
@@ -226,19 +230,32 @@ class PlaytomicClient:
         """
         self._ensure_authenticated()
 
-        # Bepaal de payment method ID uit de intent response
+        # Bepaal de payment method ID uit de intent response.
+        # Alleen offline methoden werken via de API — online methoden zoals iDEAL,
+        # Bancontact en Swish vereisen een browser-redirect en leveren een 503 op.
+        OFFLINE_METHODS = {"at_the_club", "at the club", "cash", "merchant_wallet", "pay at the club", "offer"}
+        ONLINE_ONLY = {"ideal", "bancontact", "swish", "paytrail", "credit_card", "quick_pay", "direct"}
+
         payment_method_id = None
         if intent_response:
             methods = intent_response.get("available_payment_methods") or []
-            # Zoek voorkeurs-methoden op naam (betaal ter plaatse)
-            preferred = {"at_the_club", "at the club", "cash", "merchant_wallet", "pay at the club"}
             for method in methods:
                 name = (method.get("name") or method.get("payment_method_type") or "").lower()
-                if any(p in name for p in preferred):
+                if any(p in name for p in OFFLINE_METHODS):
                     payment_method_id = method.get("payment_method_id") or method.get("id")
                     logger.info("Betaalmethode geselecteerd: %s (id: %s)", name, payment_method_id)
                     break
+
             if not payment_method_id and methods:
+                # Controleer of er überhaupt een niet-online methode beschikbaar is
+                available_names = [
+                    (m.get("name") or m.get("payment_method_type") or "").lower()
+                    for m in methods
+                ]
+                if all(any(o in n for o in ONLINE_ONLY) for n in available_names if n):
+                    raise NoSuitablePaymentMethodError(
+                        f"Geen offline betaalmethode beschikbaar — alleen: {', '.join(available_names)}"
+                    )
                 first = methods[0]
                 payment_method_id = first.get("payment_method_id") or first.get("id")
                 logger.info("Geen voorkeursmethode gevonden — eerste methode gebruikt: %s", first.get("name"))

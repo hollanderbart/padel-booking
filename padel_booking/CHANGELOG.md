@@ -1,3 +1,8 @@
+## 2.1.2
+
+- Fix: Playtomic boeking faalt met 503 bij clubs die alleen iDEAL/Bancontact/Swish aanbieden — online betaalmethoden vereisen een browser-redirect en werken niet via de API; zulke clubs worden nu overgeslagen met een duidelijke log-melding in plaats van een fout
+- Voeg `NoSuitablePaymentMethodError` toe zodat "geen offline betaalmethode" onderscheiden wordt van echte boekingsfouten
+
 ## 2.1.1
 
 - Fix: Playtomic boeking mislukt met `can't compare offset-naive and offset-aware datetimes` — token expiry uit API-response zonder timezone-info wordt nu altijd als UTC behandeld (zelfde fix als in `_load_cached_token`)

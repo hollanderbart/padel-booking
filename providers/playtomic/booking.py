@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from providers.base import ProviderResult
-from providers.playtomic.client import PlaytomicAuthError, PlaytomicClient
+from providers.playtomic.client import NoSuitablePaymentMethodError, PlaytomicAuthError, PlaytomicClient
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +278,12 @@ class PlaytomicBooker:
                         },
                     )
 
+                except NoSuitablePaymentMethodError as e:
+                    logger.info(
+                        "Club %s overgeslagen: %s",
+                        slot_info["tenant_name"], e,
+                    )
+                    continue
                 except Exception as e:
                     logger.warning(
                         "Boeking mislukt bij %s op %s: %s",
