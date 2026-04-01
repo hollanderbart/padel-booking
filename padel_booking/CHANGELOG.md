@@ -1,3 +1,8 @@
+## 2.0.4
+
+- Fix: provider stderr altijd zichtbaar in HA log (was alleen op DEBUG level)
+- Fix: exit code van provider wordt getoond bij lege output voor betere diagnose
+
 ## 2.0.3
 
 - Fix Playtomic slot matching: UTC tijden worden nu correct naar lokale tijd geconverteerd (zomertijd/wintertijd)

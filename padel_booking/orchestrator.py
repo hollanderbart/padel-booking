@@ -158,14 +158,15 @@ async def run_provider(name: str, request: dict, debug: bool) -> dict:
         input_data = json.dumps(request).encode()
         stdout, stderr = await proc.communicate(input=input_data)
 
-        # Log provider stderr als debug output
+        # Log provider stderr — INFO zodat het altijd zichtbaar is in de HA log
         if stderr:
             for line in stderr.decode(errors="replace").splitlines():
-                logger.debug("[%s] %s", name, line)
+                if line.strip():
+                    logger.info("[%s] %s", name, line)
 
         if not stdout.strip():
-            logger.warning("Provider '%s' gaf geen output", name)
-            return {"success": False, "provider": name, "error": "geen output van provider"}
+            logger.warning("Provider '%s' gaf geen output (exit code: %s)", name, proc.returncode)
+            return {"success": False, "provider": name, "error": f"geen output van provider (exit {proc.returncode})"}
 
         result = json.loads(stdout.decode())
         if result.get("success"):
