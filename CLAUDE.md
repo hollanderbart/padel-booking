@@ -24,7 +24,7 @@ Gebruik [semantic versioning](https://semver.org/):
 1. Maak de wijziging in de bronbestanden in de repo root
 2. Verhoog het versienummer in `padel_booking/config.yaml`
 3. **Voeg een entry toe aan `padel_booking/CHANGELOG.md`** met het nieuwe versienummer en een beknopte beschrijving van de wijzigingen (nieuwste versie bovenaan)
-4. **Update `README.md`** als de wijziging de installatie, configuratie, gebruik of gedrag van notificaties beïnvloedt (zie sectie hieronder)
+4. **Update altijd `README.md`** — bij elke aanpassing, ook kleine (zie sectie hieronder voor wat er in de README hoort)
 5. Commit en push naar `main` — **doe dit altijd zonder te vragen**
 6. In HA: **Settings → Add-ons → Padel Booking → ⋮ → Check for updates → Update**
 
