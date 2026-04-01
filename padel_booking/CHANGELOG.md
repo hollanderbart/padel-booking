@@ -1,3 +1,8 @@
+## 2.0.2
+
+- Playtomic email en wachtwoord naar boven in de configuratie UI verplaatst
+- Playtomic email en wachtwoord zijn nu verplichte velden (geen validatiefout meer bij lege waarde)
+
 ## 2.0.1
 
 - Fix: Docker build mislukte omdat providers/ en orchestrator.py niet beschikbaar waren in de addon build context; gesynchroniseerde kopieën toegevoegd aan padel_booking/
