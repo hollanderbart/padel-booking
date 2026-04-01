@@ -1,3 +1,13 @@
+## 2.0.0
+
+- Herstructurering naar provider/orchestrator architectuur
+- Voeg Playtomic support toe via REST API (geen browser nodig)
+- Orchestrator coördineert providers als parallelle subprocessen — eerste succes wint
+- Addon hernoemd van `knltb_padel_booking` naar `padel_booking`
+- Configuratie pad gewijzigd van `/config/knltb/` naar `/config/padel/`
+- Nieuwe config-opties: `meetandplay_enabled`, `playtomic_enabled`, `playtomic_email`, `playtomic_password`, `location_latitude`, `location_longitude`
+- Boekingsgeschiedenis bevat nu `provider` veld
+
 ## 1.2.5
 
 - Fix: echte betaalprovider-URL wordt nu correct opgehaald en verstuurd in de notificatie

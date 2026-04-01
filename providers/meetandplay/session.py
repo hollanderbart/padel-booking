@@ -26,35 +26,17 @@ class SessionManager:
     """Beheert browser sessies en cookies."""
 
     def __init__(self, cookies_file: str):
-        """
-        Initialiseer de session manager.
-
-        Args:
-            cookies_file: Pad naar het bestand om cookies in op te slaan
-        """
         self.cookies_file = Path(cookies_file)
 
     def cookies_exist(self) -> bool:
-        """Check of er opgeslagen cookies zijn."""
         return self.cookies_file.exists() and self.cookies_file.stat().st_size > 0
 
     def load_cookies(self, context: BrowserContext) -> bool:
-        """
-        Laad opgeslagen cookies in de browser context.
-
-        Args:
-            context: Playwright browser context
-
-        Returns:
-            True als cookies succesvol geladen zijn, False anders
-        """
         if not self.cookies_exist():
             return False
-
         try:
-            with open(self.cookies_file, 'r') as f:
+            with open(self.cookies_file, "r") as f:
                 cookies = json.load(f)
-
             context.add_cookies(cookies)
             return True
         except Exception as e:
@@ -62,41 +44,21 @@ class SessionManager:
             return False
 
     def save_cookies(self, context: BrowserContext) -> None:
-        """
-        Sla cookies van de huidige context op.
-
-        Args:
-            context: Playwright browser context
-        """
         try:
             cookies = context.cookies()
-            with open(self.cookies_file, 'w') as f:
+            with open(self.cookies_file, "w") as f:
                 json.dump(cookies, f, indent=2)
             logger.info("Cookies opgeslagen in %s", self.cookies_file)
         except Exception as e:
             logger.warning("Fout bij opslaan van cookies: %s", e)
 
     def clear_cookies(self) -> None:
-        """Verwijder opgeslagen cookies."""
         if self.cookies_file.exists():
             self.cookies_file.unlink()
             logger.info("Cookies verwijderd")
 
     def is_logged_in(self, page: Page) -> bool:
-        """
-        Check of de gebruiker is ingelogd op Meet & Play.
-
-        Navigeert naar de homepage en controleert of de 'Inloggen'-knop
-        aanwezig is (niet ingelogd) of afwezig is (ingelogd).
-
-        Args:
-            page: Playwright page object
-
-        Returns:
-            True als ingelogd, False anders
-        """
         try:
-            # Navigeer alleen als we niet al op meetandplay.nl zijn
             if "meetandplay.nl" not in page.url:
                 page.goto("https://www.meetandplay.nl", wait_until="load", timeout=15000)
                 page.wait_for_timeout(1500)
@@ -104,13 +66,10 @@ class SessionManager:
                 page.wait_for_load_state("load", timeout=15000)
                 page.wait_for_timeout(1500)
 
-            # Na SSO redirect kunnen we op de KNLTB ID pagina zijn beland — dan opnieuw proberen
             if "meetandplay.nl" not in page.url:
                 logger.info("Niet op meetandplay.nl na sessiecheck (%s) — als niet ingelogd beschouwen", page.url)
                 return False
 
-            # Als de gebruiker ingelogd is, verdwijnt de 'Inloggen'-link uit de nav
-            # en verschijnt er een 'Uitloggen' of account-gerelateerde link.
             login_link = page.locator(
                 'a[href="https://meetandplay.nl/inloggen"], a[href="/inloggen"]'
             )
@@ -118,7 +77,6 @@ class SessionManager:
                 logger.info("Sessie verlopen: 'Inloggen'-link aanwezig in navigatie")
                 return False
 
-            # Extra check: zoek naar account/uitloggen link
             for selector in [
                 'a[href*="uitloggen"]',
                 'a[href*="logout"]',
@@ -129,8 +87,6 @@ class SessionManager:
                     logger.info("Sessie geldig (gevonden: %s)", selector)
                     return True
 
-            # Geen inloggen-link gevonden maar ook geen duidelijke account-link:
-            # veronderstel ingelogd (login-link is weg)
             logger.info("Sessie lijkt geldig (geen inloggen-link gevonden)")
             return True
 
@@ -139,32 +95,17 @@ class SessionManager:
             return False
 
     def auto_login(self, browser: Browser, email: str, password: str) -> tuple:
-        """
-        Probeer automatisch in te loggen via KNLTB ID SSO.
-
-        De login op meetandplay.nl werkt via een two-step flow:
-        1. Voer e-mailadres in op /inloggen
-        2. Livewire bepaalt of wachtwoord of SSO-redirect gebruikt wordt
-
-        Args:
-            browser: Playwright browser object
-            email: KNLTB e-mailadres
-            password: KNLTB wachtwoord
-
-        Returns:
-            (BrowserContext, True) als login gelukt, (None, False) anders
-        """
         import re as _re
 
         logger.info("Automatisch inloggen als %s...", email)
 
         context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
+            viewport={"width": 1920, "height": 1080},
             user_agent=(
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/120.0.0.0 Safari/537.36'
-            )
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
         )
         page = context.new_page()
 
@@ -172,7 +113,6 @@ class SessionManager:
             page.goto("https://www.meetandplay.nl/inloggen", wait_until="load", timeout=30000)
             page.wait_for_timeout(1500)
 
-            # Accepteer cookie banner indien aanwezig
             try:
                 cookie_btn = page.locator('button:has-text("Alles toestaan")')
                 if cookie_btn.count() > 0:
@@ -181,24 +121,20 @@ class SessionManager:
             except Exception:
                 pass
 
-            # Stap 1: vul e-mailadres in en klik de submit/pijl-knop
-            page.wait_for_selector('#eail', state='visible', timeout=10000)
-            email_input = page.locator('#eail')
+            page.wait_for_selector("#eail", state="visible", timeout=10000)
+            email_input = page.locator("#eail")
             email_input.fill(email)
             email_input.blur()
             page.wait_for_timeout(1000)
 
-            # Klik de pijl/submit-knop naast het e-mailveld
             submit_btn = page.locator('button[type="submit"], input[type="submit"], button.btn-primary, button:has(svg)')
             if submit_btn.count() > 0:
                 logger.info("Submit-knop gevonden, klikken...")
                 submit_btn.first.click()
             else:
-                # Fallback: verstuur het formulier via enter
                 email_input.press("Enter")
             page.wait_for_timeout(3000)
 
-            # Stap 2: check of een wachtwoordveld verscheen (legacy accounts)
             password_input = page.locator('input[type="password"], input[wire\\:model\\.blur="password"]')
             if password_input.count() > 0:
                 logger.info("Wachtwoordveld gevonden — legacy login flow")
@@ -209,19 +145,16 @@ class SessionManager:
                 page.wait_for_load_state("load", timeout=15000)
                 page.wait_for_timeout(2000)
             else:
-                # KNLTB ID SSO flow: haal de SSO-link op uit de Livewire HTML
                 html = page.content()
                 sso_match = _re.search(
                     r'href="(https://meetandplay\.nl/knltb-id/sso[^"]+)"', html
                 )
                 if sso_match:
-                    sso_url = sso_match.group(1).replace('&amp;', '&')
+                    sso_url = sso_match.group(1).replace("&amp;", "&")
                     logger.info("KNLTB ID SSO redirect gevonden")
                     page.goto(sso_url, wait_until="load", timeout=30000)
                     page.wait_for_timeout(2000)
 
-                    # Op het KNLTB ID portaal: two-step login
-                    # Stap A: vul e-mailadres/username in (veld: Login.Email of vergelijkbaar)
                     username_field = page.locator(
                         'input[name="Login.Email"], input[name="Username"], '
                         'input[name="email"], input[type="email"]'
@@ -234,11 +167,10 @@ class SessionManager:
                             submit_btn.first.click()
                             page.wait_for_timeout(2000)
 
-                    # Stap B: wacht op wachtwoordveld en vul in
                     try:
                         page.wait_for_selector(
                             'input[type="password"], input[name="Password"], input[name="password"]',
-                            state='visible',
+                            state="visible",
                             timeout=10000,
                         )
                     except Exception:
@@ -268,12 +200,11 @@ class SessionManager:
                         "Geen SSO-link en geen wachtwoordveld gevonden op %s", page.url
                     )
                     try:
-                        page.screenshot(path="/config/knltb/debug_login.png", full_page=True)
-                        logger.info("Debug screenshot opgeslagen: /config/knltb/debug_login.png")
+                        page.screenshot(path="/config/padel/debug_login.png", full_page=True)
+                        logger.info("Debug screenshot opgeslagen: /config/padel/debug_login.png")
                     except Exception:
                         pass
 
-            # Controleer of login gelukt is
             login_ok = self.is_logged_in(page)
 
         except Exception as e:
@@ -288,8 +219,8 @@ class SessionManager:
 
         logger.warning("Automatisch inloggen mislukt.")
         try:
-            page.screenshot(path="/config/knltb/debug_login_failed.png", full_page=True)
-            logger.info("Debug screenshot opgeslagen: /config/knltb/debug_login_failed.png")
+            page.screenshot(path="/config/padel/debug_login_failed.png", full_page=True)
+            logger.info("Debug screenshot opgeslagen: /config/padel/debug_login_failed.png")
         except Exception:
             pass
         page.close()
@@ -297,17 +228,6 @@ class SessionManager:
         return None, False
 
     def manual_login(self, browser: Browser, url: str = "https://www.meetandplay.nl/inloggen") -> BrowserContext:
-        """
-        Open een zichtbare browser voor handmatige login.
-        Wacht tot de gebruiker is ingelogd en sluit de browser.
-
-        Args:
-            browser: Playwright browser object
-            url: URL om te openen
-
-        Returns:
-            Browser context met de nieuwe sessie
-        """
         logger.info("Browser openen voor handmatige login...")
         print("\n" + "=" * 60)
         print("HANDMATIGE LOGIN VEREIST")
@@ -319,12 +239,12 @@ class SessionManager:
         print("=" * 60 + "\n")
 
         context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
+            viewport={"width": 1920, "height": 1080},
             user_agent=(
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/120.0.0.0 Safari/537.36'
-            )
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
         )
         page = context.new_page()
         page.goto(url)

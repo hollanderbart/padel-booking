@@ -1,5 +1,5 @@
 """
-Integratietest voor het KNLTB Padel Booking script.
+Integratietest voor het Padel Booking script — Meet & Play provider.
 
 De test verifieert de volledige flow tot en met de checkout-pagina,
 maar rondt de betaling NIET af — er wordt dus geen echte boeking gemaakt.
@@ -20,22 +20,35 @@ import pytest
 from dotenv import load_dotenv
 from playwright.sync_api import Page, sync_playwright
 
-from booking import PadelBooker, SEARCH_URL
+from providers.meetandplay.booking import MeetAndPlayBooker, SEARCH_URL
 
 # Laad .env zodat credentials beschikbaar zijn
 load_dotenv()
 
+MINIMAL_REQUEST = {
+    "booking_request": {
+        "location": {"city": "Boskoop", "radius_km": 20},
+        "day": "thursday",
+        "time_start": "19:30",
+        "time_end": "21:00",
+        "duration_minutes": 90,
+        "court_type": "indoor",
+        "game_type": "double",
+        "weeks_ahead": 4,
+    },
+    "credentials": {},
+    "provider_config": {"cookies_file": ".meetandplay_cookies.json"},
+    "dry_run": False,
+}
 
-def _find_any_available_slot(page: Page, booker: PadelBooker) -> dict | None:
+
+def _find_any_available_slot(page: Page, booker: MeetAndPlayBooker) -> dict | None:
     """
     Zoek flexibel een beschikbaar indoor slot bij een van de gevonden clubs
     in de komende 7 dagen, zonder beperking op tijdvenster of dagdeel.
-
-    Returns:
-        Dict met slot-info of None als er geen beschikbaar slot is.
     """
-    city = booker.config["location"]["city"]
-    radius = str(booker.config["location"]["radius_km"])
+    city = booker._booking["location"]["city"]
+    radius = str(booker._booking["location"]["radius_km"])
 
     for day_offset in range(7):
         date = datetime.now() + timedelta(days=day_offset)
@@ -45,25 +58,20 @@ def _find_any_available_slot(page: Page, booker: PadelBooker) -> dict | None:
         page.wait_for_timeout(1500)
         booker._accept_cookies(page)
 
-        # Sport: Padel
         page.locator("select#sportId").select_option("2")
         page.wait_for_timeout(1500)
 
-        # Locatie
         loc_input = page.locator("input#location")
         loc_input.fill(city)
         loc_input.blur()
         page.wait_for_timeout(2500)
 
-        # Afstand
         page.locator("select#distance").select_option(radius)
         page.wait_for_timeout(1500)
 
-        # Daktype: binnen
         page.locator("select#indoor").select_option("INDOOR")
         page.wait_for_timeout(1500)
 
-        # Datum instellen via Livewire
         lw_match = re.search(
             r"window\.Livewire\.find\('([^']+)'\)\.set\('date'", page.content()
         )
@@ -73,7 +81,6 @@ def _find_any_available_slot(page: Page, booker: PadelBooker) -> dict | None:
             )
             page.wait_for_timeout(2000)
 
-        # Clubs ophalen
         cards = page.locator(".c-club-card.mp-club-card")
         count = cards.count()
 
@@ -91,24 +98,20 @@ def _find_any_available_slot(page: Page, booker: PadelBooker) -> dict | None:
 
             club = {"name": name, "address": address, "url": book_url}
 
-            # Navigeer naar clubpagina
             page.goto(club["url"], wait_until="load", timeout=60000)
             page.wait_for_timeout(1500)
             booker._accept_cookies(page)
 
-            # Sport: Padel
             sport_select = page.locator("select#sportId")
             if sport_select.count() > 0:
                 sport_select.select_option("2")
                 page.wait_for_timeout(1500)
 
-            # Daktype: binnen
             indoor_select = page.locator("select#indoor")
             if indoor_select.count() > 0:
                 indoor_select.select_option("INDOOR")
                 page.wait_for_timeout(1500)
 
-            # Datum instellen via Livewire
             lw_match = re.search(
                 r"window\.Livewire\.find\('([^']+)'\)\.set\('date'", page.content()
             )
@@ -118,13 +121,11 @@ def _find_any_available_slot(page: Page, booker: PadelBooker) -> dict | None:
                 )
                 page.wait_for_timeout(2000)
 
-            # Haal tijdsloten op
             slots = page.locator(".timeslot-container a.timeslot")
 
             for i in range(slots.count()):
                 slot = slots.nth(i)
 
-                # Skip buiten-banen
                 try:
                     label = slot.evaluate("""el => {
                         let s = el.closest('.timeslots');
@@ -162,22 +163,17 @@ def _find_any_available_slot(page: Page, booker: PadelBooker) -> dict | None:
     return None
 
 
-def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | None:
+def _reach_checkout(page: Page, booker: MeetAndPlayBooker, slot_info: dict) -> str | None:
     """
     Klik het tijdslot aan, voeg toe aan winkelwagen en klik Afrekenen.
-    Betaling wordt NIET afgerond — geeft de checkout-URL terug zonder verder te navigeren.
-
-    Returns:
-        De checkout-URL als string, of None als de flow mislukt.
+    Betaling wordt NIET afgerond — geeft de checkout-URL terug.
     """
     slot_id = slot_info["slot_id"]
 
-    # Navigeer terug naar de clubpagina met het tijdslot
     page.goto(slot_info["club_url"], wait_until="load", timeout=60000)
     page.wait_for_timeout(1500)
     booker._accept_cookies(page)
 
-    # Datum instellen
     lw_match = re.search(
         r"window\.Livewire\.find\('([^']+)'\)\.set\('date'", page.content()
     )
@@ -187,7 +183,6 @@ def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | N
         )
         page.wait_for_timeout(2000)
 
-    # Stap 1: klik op het tijdslot
     slot_anchor = page.locator(f"a.timeslot[id='{slot_id}']")
     if slot_anchor.count() == 0:
         slot_anchor = page.locator(f"a[id='{slot_id}']")
@@ -197,7 +192,6 @@ def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | N
     slot_anchor.first.click()
     page.wait_for_timeout(2000)
 
-    # Stap 2: klik "Toevoegen" / "Reserveren" / "Boeken"
     add_btn = page.locator('button:has-text("Toevoegen")')
     if add_btn.count() == 0:
         add_btn = page.locator('button:has-text("Reserveren")')
@@ -209,7 +203,6 @@ def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | N
     add_btn.first.click()
     page.wait_for_timeout(2500)
 
-    # Stap 3: klik "Afrekenen"
     checkout_locators = [
         f'button[wire\\:click="checkout({slot_id})"]:visible',
         'button[wire\\:click="checkout"]:visible',
@@ -228,7 +221,6 @@ def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | N
 
     checkout_btn.first.click()
 
-    # Wacht tot Livewire asynchroon navigeert naar de checkout-pagina
     checkout_keywords = ["reserveren", "winkelwagen", "payment", "checkout", "betaling", "betalen", "order", "bestelling"]
     try:
         page.wait_for_url(
@@ -241,14 +233,11 @@ def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | N
 
     checkout_url = page.url
 
-    # Controleer of we echt op de checkout-pagina zijn beland
     on_checkout = any(kw in checkout_url.lower() for kw in checkout_keywords) or \
                   "Winkelwagen" in page.content()
     if not on_checkout:
         return None
 
-    # Stap 4: wacht tot de TOS checkbox geladen is (Livewire laadt asynchroon)
-    # dan aanvinken via JS zodat Alpine.js x-model="accepted" triggert
     tos_checkbox = page.locator("input#tos")
     try:
         tos_checkbox.wait_for(state="visible", timeout=10000)
@@ -258,7 +247,6 @@ def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | N
         page.evaluate("document.querySelector('input#tos').click()")
         page.wait_for_timeout(1000)
 
-    # Stap 5: klik "Betaling starten" en lees de betaalprovider-URL uit page.url
     pay_btn = page.locator('button:has-text("Betaling starten")')
     if pay_btn.count() == 0:
         for sel in ['button:has-text("Betalen")', 'button:has-text("Nu betalen")', 'a:has-text("Betalen")']:
@@ -268,11 +256,9 @@ def _reach_checkout(page: Page, booker: PadelBooker, slot_info: dict) -> str | N
                 break
 
     if pay_btn.count() == 0 or not pay_btn.first.is_visible():
-        # Geen betaalknop gevonden — geef checkout-URL terug als fallback
         return checkout_url
 
     pay_btn.first.click()
-    # reCAPTCHA kan ~6 seconden duren voor navigatie plaatsvindt
     try:
         page.wait_for_url(
             lambda url: url != checkout_url,
@@ -289,8 +275,6 @@ def test_full_booking_flow(headed):
     """
     Integratietest die de volledige flow doorloopt tot de checkout-pagina.
     De betaling wordt NIET afgerond — er wordt geen echte boeking gemaakt.
-
-    Geslaagd als: een geldige checkout-URL wordt teruggegeven.
     """
     import os
 
@@ -302,32 +286,32 @@ def test_full_booking_flow(headed):
             "KNLTB_EMAIL en/of KNLTB_PASSWORD niet gevonden in omgeving of .env — test overgeslagen"
         )
 
-    booker = PadelBooker("config.yaml")
+    request = dict(MINIMAL_REQUEST)
+    request["credentials"] = {"email": email, "password": password}
+
+    booker = MeetAndPlayBooker(request)
     browser = None
     context = None
 
     with sync_playwright() as pw:
         booker._playwright = pw
         browser = pw.chromium.launch(headless=not headed)
-        context = booker._make_context(browser, headed)
-        context = booker._ensure_logged_in(browser, context, headed)
+        context = booker._make_context(browser)
+        context = booker._ensure_logged_in(browser, context)
 
         try:
             page = context.new_page()
 
-            # Stap 1: clubs zoeken
             clubs = booker._search_clubs(page)
             assert len(clubs) > 0, (
                 "Geen clubs gevonden — controleer config.yaml (locatie/filters)"
             )
 
-            # Stap 2: beschikbaar slot vinden
             slot_info = _find_any_available_slot(page, booker)
             assert slot_info is not None, (
                 "Geen enkel beschikbaar indoor slot gevonden in de komende 7 dagen"
             )
 
-            # Stap 3: flow tot checkout — betaling NIET afronden
             checkout_url = _reach_checkout(page, booker, slot_info)
 
             assert checkout_url is not None, (

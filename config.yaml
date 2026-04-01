@@ -1,17 +1,28 @@
 location:
   city: Boskoop
   radius_km: 20
+  # Coördinaten voor Playtomic (vereist als playtomic.enabled: true)
+  latitude: 52.0738
+  longitude: 4.6567
 
 booking:
   day: thursday
   time_start: "19:30"
   time_end: "21:00"
   duration_minutes: 90  # 60 of 90 minuten
-  court_type: indoor  # indoor of outdoor
-  game_type: double   # double = 4 spelers
+  court_type: indoor    # indoor of outdoor
+  game_type: double     # double = 4 spelers
+  weeks_ahead: 4
 
-session:
-  cookies_file: .session_cookies.json
-  state_file: .booking_state.json
+providers:
+  meetandplay:
+    enabled: true
+    cookies_file: .meetandplay_cookies.json
+  playtomic:
+    enabled: false
+    token_cache_file: .playtomic_token.json
+
+state:
+  booking_state_file: .booking_state.json
   history_file: booking_history.json
   last_run_file: last_run.json
