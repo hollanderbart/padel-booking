@@ -250,12 +250,17 @@ class PlaytomicBooker:
                         error="dry_run — slot gevonden maar niet geboekt",
                     )
 
-                club_url = f"https://app.playtomic.io/clubs/{slot_info['tenant_id']}"
-
                 start_dt = datetime.fromisoformat(slot_info["start_time"])
                 time_str = start_dt.strftime("%H:%M")
                 end_dt = start_dt + timedelta(minutes=slot_info["duration_minutes"])
                 end_str = end_dt.strftime("%H:%M")
+                date_str_iso = start_dt.strftime("%Y-%m-%d")
+
+                club_url = (
+                    f"https://app.playtomic.io/clubs/{slot_info['tenant_id']}"
+                    f"?sport=PADEL&date={date_str_iso}&startTime={time_str}"
+                    f"&resourceId={slot_info['resource_id']}"
+                )
 
                 logger.info(
                     "Beschikbaar slot gevonden bij %s op %s %s-%s — %s",

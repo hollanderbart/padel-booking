@@ -1,3 +1,7 @@
+## 2.1.6
+
+- Playtomic club-URL bevat nu datum, starttijd en resource ID als query parameters zodat de app direct op het juiste slot en baan opent (`?sport=PADEL&date=...&startTime=...&resourceId=...`)
+
 ## 2.1.5
 
 - Fix: clubnaam in notificatietekst ("Boek nu: Sunset Padel Alphen") wordt nu direct uit de bestaande locatiestring gehaald — geen overbodige extra parameter meer
