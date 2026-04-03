@@ -236,6 +236,34 @@ Het bestand bevat maximaal 20 entries. De nieuwste boeking staat bovenaan.
 
 ---
 
+## Boeking resetten (opnieuw zoeken forceren)
+
+Na een gevonden slot slaat de addon de boekingsdatum op in `/config/padel/.booking_state.json`. Zolang dit bestand bestaat en de datum in de toekomst ligt, slaat de addon volgende runs over. Met een knop op het dashboard kun je dit bestand wissen zodat de addon opnieuw gaat zoeken.
+
+### Stap 1 — Voeg de shell_command toe aan `configuration.yaml`
+
+```yaml
+shell_command:
+  padel_reset_booking: "rm -f /config/padel/.booking_state.json"
+```
+
+Herstart daarna Home Assistant.
+
+### Stap 2 — Voeg een knop toe aan je Lovelace dashboard
+
+```yaml
+type: button
+name: Padel boeking resetten
+icon: mdi:calendar-remove
+tap_action:
+  action: call-service
+  service: shell_command.padel_reset_booking
+```
+
+Na het tikken op de knop zal de addon bij de eerstvolgende run opnieuw zoeken naar een beschikbaar slot.
+
+---
+
 ## Push notificaties
 
 Bij een beschikbaar slot ontvang je een push notificatie ("Padelbaan beschikbaar!") met:
