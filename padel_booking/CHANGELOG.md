@@ -1,3 +1,7 @@
+## 2.1.5
+
+- Fix: clubnaam in notificatietekst ("Boek nu: Sunset Padel Alphen") wordt nu direct uit de bestaande locatiestring gehaald — geen overbodige extra parameter meer
+
 ## 2.1.4
 
 - Notificatie toont clubnaam als leesbare linktekst ("Boek nu: Sunset Padel Alphen") i.p.v. de kale URL; tikken op de notificatie opent de club-URL nog steeds direct
