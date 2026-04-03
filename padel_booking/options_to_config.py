@@ -43,7 +43,7 @@ config = {
         },
     },
     "state": {
-        "booking_state_file": "/data/.booking_state.json",
+        "booking_state_file": "/config/padel/.booking_state.json",
         "history_file": "/config/padel/booking_history.json",
         "last_run_file": "/config/padel/last_run.json",
     },

@@ -1,3 +1,7 @@
+## 2.2.1
+
+- Fix: booking state bestand verplaatst van `/data/.booking_state.json` naar `/config/padel/.booking_state.json` zodat het van buitenaf bereikbaar is (bijv. via shell_command reset knop)
+
 ## 2.2.0
 
 - Fix: `fetch_bookings.py` ontbrak in Dockerfile COPY instructie — bestand werd nooit in de image opgenomen ondanks aanwezigheid in de build context
