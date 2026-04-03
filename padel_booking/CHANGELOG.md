@@ -1,3 +1,7 @@
+## 2.1.8
+
+- README: instructies toegevoegd voor "Boeking resetten" knop via HA shell_command en Lovelace button card
+
 ## 2.1.7
 
 - Fix: `fetch_bookings.py` ontbrak in de addon build context — `run.sh` gaf `No such file or directory` na elke succesvolle run

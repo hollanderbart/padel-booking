@@ -1,5 +1,5 @@
 name: "Padel Booking"
-version: "2.1.7"
+version: "2.1.8"
 slug: "padel_booking"
 description: "Automatisch padelbanen boeken op meetandplay.nl en Playtomic"
 arch:
