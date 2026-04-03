@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium --with-deps
 
-COPY orchestrator.py notify.py options_to_config.py ./
+COPY orchestrator.py notify.py options_to_config.py fetch_bookings.py ./
 COPY providers/ ./providers/
 COPY booking_config.yaml ./config.yaml
 COPY run.sh /run.sh
