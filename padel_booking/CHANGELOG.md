@@ -1,3 +1,7 @@
+## 2.1.7
+
+- Fix: `fetch_bookings.py` ontbrak in de addon build context — `run.sh` gaf `No such file or directory` na elke succesvolle run
+
 ## 2.1.6
 
 - Playtomic club-URL bevat nu datum, starttijd en resource ID als query parameters zodat de app direct op het juiste slot en baan opent (`?sport=PADEL&date=...&startTime=...&resourceId=...`)
