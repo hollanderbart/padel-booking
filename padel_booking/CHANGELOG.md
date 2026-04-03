@@ -1,3 +1,7 @@
+## 2.2.0
+
+- Fix: `fetch_bookings.py` ontbrak in Dockerfile COPY instructie — bestand werd nooit in de image opgenomen ondanks aanwezigheid in de build context
+
 ## 2.1.9
 
 - Fix: Playtomic deep link gebruikt nu `/tenant/` i.p.v. `/clubs/` — correcte URL die werkt in de app
