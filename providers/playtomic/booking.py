@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from providers.base import ProviderResult
-from providers.playtomic.client import NoSuitablePaymentMethodError, PlaytomicAuthError, PlaytomicClient
+from providers.playtomic.client import PlaytomicAuthError, PlaytomicClient
 
 logger = logging.getLogger(__name__)
 
@@ -250,46 +250,30 @@ class PlaytomicBooker:
                         error="dry_run — slot gevonden maar niet geboekt",
                     )
 
-                try:
-                    intent = self._client.create_payment_intent(
-                        tenant_id=slot_info["tenant_id"],
-                        resource_id=slot_info["resource_id"],
-                        start_time=slot_info["start_time"],
-                        duration_minutes=slot_info["duration_minutes"],
-                    )
-                    # API geeft payment_intent_id of id terug
-                    intent_id = intent.get("payment_intent_id") or intent.get("id")
+                club_url = f"https://app.playtomic.io/clubs/{slot_info['tenant_id']}"
 
-                    self._client.set_payment_method(intent_id, intent_response=intent)
-                    self._client.confirm_booking(intent_id)
+                start_dt = datetime.fromisoformat(slot_info["start_time"])
+                time_str = start_dt.strftime("%H:%M")
+                end_dt = start_dt + timedelta(minutes=slot_info["duration_minutes"])
+                end_str = end_dt.strftime("%H:%M")
 
-                    payment_url = f"https://playtomic.io/booking/{intent_id}"
+                logger.info(
+                    "Beschikbaar slot gevonden bij %s op %s %s-%s — %s",
+                    slot_info["tenant_name"], date_str, time_str, end_str, club_url,
+                )
 
-                    return ProviderResult(
-                        success=True,
-                        provider="playtomic",
-                        booked_date=booking_date.strftime("%Y-%m-%d"),
-                        slot_info={
-                            "club_name": slot_info["tenant_name"],
-                            "club_address": slot_info["tenant_address"],
-                            "court_name": slot_info["resource_name"],
-                            "time_range": f"{self._booking['time_start']} - {self._booking['time_end']} {slot_info['duration_minutes']} minuten",
-                            "payment_url": payment_url,
-                        },
-                    )
-
-                except NoSuitablePaymentMethodError as e:
-                    logger.info(
-                        "Club %s overgeslagen: %s",
-                        slot_info["tenant_name"], e,
-                    )
-                    continue
-                except Exception as e:
-                    logger.warning(
-                        "Boeking mislukt bij %s op %s: %s",
-                        slot_info["tenant_name"], date_str, e,
-                    )
-                    continue
+                return ProviderResult(
+                    success=True,
+                    provider="playtomic",
+                    booked_date=booking_date.strftime("%Y-%m-%d"),
+                    slot_info={
+                        "club_name": slot_info["tenant_name"],
+                        "club_address": slot_info["tenant_address"],
+                        "court_name": slot_info["resource_name"],
+                        "time_range": f"{time_str} - {end_str} ({slot_info['duration_minutes']} minuten)",
+                        "payment_url": club_url,
+                    },
+                )
 
         return ProviderResult(
             success=False,

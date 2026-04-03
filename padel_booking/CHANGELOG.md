@@ -1,3 +1,9 @@
+## 2.1.3
+
+- Playtomic boekt niet meer automatisch — bij een beschikbaar slot wordt een notificatie gestuurd met de club-URL (`https://app.playtomic.io/clubs/{id}`) zodat de gebruiker de boeking en betaling zelf handmatig kan afronden
+- Notificatietitel gewijzigd van "Padelbaan geboekt!" naar "Padelbaan beschikbaar!"
+- Console-output bijgewerkt: "BOEKING GESLAAGD" → "BESCHIKBAARHEID GEVONDEN", URL-label → "Boek nu:"
+
 ## 2.1.2
 
 - Fix: Playtomic boeking faalt met 503 bij clubs die alleen iDEAL/Bancontact/Swish aanbieden — online betaalmethoden vereisen een browser-redirect en werken niet via de API; zulke clubs worden nu overgeslagen met een duidelijke log-melding in plaats van een fout

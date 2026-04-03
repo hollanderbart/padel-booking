@@ -331,13 +331,13 @@ async def main_async(debug: bool, dry_run: bool) -> int:
         )
 
         print("\n" + "=" * 60)
-        print(f"BOEKING GESLAAGD via {provider.upper()}")
+        print(f"BESCHIKBAARHEID GEVONDEN via {provider.upper()}")
         print("=" * 60)
-        print(f"Club:  {slot_info['club_name']}")
-        print(f"Adres: {slot_info['club_address']}")
-        print(f"Baan:  {slot_info['court_name']}")
-        print(f"Tijd:  {slot_info['time_range']}")
-        print(f"URL:   {slot_info.get('payment_url', '')}")
+        print(f"Club:    {slot_info['club_name']}")
+        print(f"Adres:   {slot_info['club_address']}")
+        print(f"Baan:    {slot_info['court_name']}")
+        print(f"Tijd:    {slot_info['time_range']}")
+        print(f"Boek nu: {slot_info.get('payment_url', '')}")
         print("=" * 60 + "\n")
         return 0
     else:

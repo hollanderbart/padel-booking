@@ -90,8 +90,8 @@ def notify_booking_available(court_name: str, time: str, location: str, payment_
     notifier = Notifier()
     message = f"{court_name}\n{time}\n{location}"
     if payment_url:
-        message += f"\n\n{payment_url}"
-    notifier.send(title="Padelbaan geboekt!", message=message, sound=True, url=payment_url)
+        message += f"\n\nBoek nu: {payment_url}"
+    notifier.send(title="Padelbaan beschikbaar!", message=message, sound=True, url=payment_url)
 
 
 def notify_no_courts_available() -> None:

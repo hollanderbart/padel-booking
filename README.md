@@ -1,6 +1,6 @@
 # Padel Booking
 
-Automatiseert het boeken van padelbanen op [meetandplay.nl](https://www.meetandplay.nl) en [Playtomic](https://playtomic.io). Het script zoekt elke nacht naar beschikbare binnenbanen in een opgegeven regio en tijdvenster, en stuurt een push notificatie met een directe link naar de betalingspagina zodra een boeking gelukt is.
+Zoekt automatisch naar beschikbare padelbanen op [meetandplay.nl](https://www.meetandplay.nl) en [Playtomic](https://playtomic.io). Bij een beschikbaar slot ontvang je een push notificatie met een directe link naar de club, zodat je de boeking en betaling zelf handmatig kunt afronden.
 
 ## Hoe het werkt
 
@@ -15,9 +15,9 @@ Een **orchestrator** coördineert meerdere providers die parallel draaien als lo
 **Playtomic provider** (REST API — geen browser nodig):
 1. Logt in via de Playtomic API met email/wachtwoord
 2. Zoekt clubs in de buurt via coördinaten, gesorteerd op afstand (dichtstbijzijnde eerst)
-3. Haalt beschikbaarheid op en boekt het eerste passende slot via de officiële payment intent API
+3. Haalt beschikbaarheid op en stuurt een notificatie met de club-URL (`https://app.playtomic.io/clubs/{id}`) zodra een passend slot gevonden is
 
-De betaling zelf doe je handmatig via de link in de notificatie. Er worden alleen notificaties gestuurd bij een succesvolle boeking.
+De boeking en betaling doe je zelf handmatig via de link in de notificatie. Er worden alleen notificaties gestuurd als er een beschikbaar slot gevonden wordt.
 
 ---
 
@@ -85,7 +85,7 @@ INFO  Automatisch inloggen gelukt!
 INFO  8 club(s) gevonden na filteren
 INFO  Tijdslot gevonden: Sportcentrum Boskoop om 19:30 (baan: Padelbaan 1)
 INFO  Winkelwagen bereikt
-INFO  HA push notificatie verzonden: Padelbaan geboekt!
+INFO  HA push notificatie verzonden: Padelbaan beschikbaar!
 ```
 
 ### Stap 5 — Automatisering instellen
@@ -238,11 +238,10 @@ Het bestand bevat maximaal 20 entries. De nieuwste boeking staat bovenaan.
 
 ## Push notificaties
 
-Bij een succesvolle boeking ontvang je een push notificatie met:
-- Baannaam
-- Tijdstip
+Bij een beschikbaar slot ontvang je een push notificatie ("Padelbaan beschikbaar!") met:
+- Baannaam en exacte tijdstip
 - Clubnaam en adres
-- Een directe link naar de betalingspagina (tik op de notificatie om te openen)
+- Een directe link naar de clubpagina om zelf te boeken (tik op de notificatie om te openen)
 
 Er worden **geen** notificaties gestuurd als er geen baan gevonden wordt.
 
