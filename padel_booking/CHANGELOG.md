@@ -1,3 +1,7 @@
+## 2.1.9
+
+- Fix: Playtomic deep link gebruikt nu `/tenant/` i.p.v. `/clubs/` — correcte URL die werkt in de app
+
 ## 2.1.8
 
 - README: instructies toegevoegd voor "Boeking resetten" knop via HA shell_command en Lovelace button card

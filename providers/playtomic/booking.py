@@ -257,7 +257,7 @@ class PlaytomicBooker:
                 date_str_iso = start_dt.strftime("%Y-%m-%d")
 
                 club_url = (
-                    f"https://app.playtomic.io/clubs/{slot_info['tenant_id']}"
+                    f"https://app.playtomic.io/tenant/{slot_info['tenant_id']}"
                     f"?sport=PADEL&date={date_str_iso}&startTime={time_str}"
                     f"&resourceId={slot_info['resource_id']}"
                 )
