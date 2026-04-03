@@ -1,3 +1,7 @@
+## 2.2.2
+
+- Fix: `playtomic_password` schema type gewijzigd van `str` naar `password` zodat het veld gemaskeerd wordt in de HA configuratie UI
+
 ## 2.2.1
 
 - Fix: booking state bestand verplaatst van `/data/.booking_state.json` naar `/config/padel/.booking_state.json` zodat het van buitenaf bereikbaar is (bijv. via shell_command reset knop)
