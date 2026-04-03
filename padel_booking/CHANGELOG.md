@@ -1,3 +1,7 @@
+## 2.1.4
+
+- Notificatie toont clubnaam als leesbare linktekst ("Boek nu: Sunset Padel Alphen") i.p.v. de kale URL; tikken op de notificatie opent de club-URL nog steeds direct
+
 ## 2.1.3
 
 - Playtomic boekt niet meer automatisch — bij een beschikbaar slot wordt een notificatie gestuurd met de club-URL (`https://app.playtomic.io/clubs/{id}`) zodat de gebruiker de boeking en betaling zelf handmatig kan afronden

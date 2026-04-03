@@ -328,6 +328,7 @@ async def main_async(debug: bool, dry_run: bool) -> int:
             slot_info["time_range"],
             f"{slot_info['club_name']} — {slot_info['club_address']}",
             slot_info.get("payment_url", ""),
+            slot_info.get("club_name", ""),
         )
 
         print("\n" + "=" * 60)
