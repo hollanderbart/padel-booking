@@ -63,6 +63,7 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 | `weeks_ahead` | Aantal weken vooruit zoeken |
 | `meetandplay_enabled` | Meet & Play provider in/uitschakelen (standaard `true`) |
 | `playtomic_enabled` | Playtomic provider in/uitschakelen (standaard `false`) |
+| `fetch_bookings_enabled` | Toekomstige boekingen ophalen en opslaan naar `/config/padel/future_bookings.json` (standaard `true`) |
 | `playtomic_email` | E-mailadres van je Playtomic account (vereist als Playtomic ingeschakeld) |
 | `playtomic_password` | Wachtwoord van je Playtomic account (vereist als Playtomic ingeschakeld) |
 

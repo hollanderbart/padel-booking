@@ -132,7 +132,13 @@ def fetch_playtomic_bookings(email: str, password: str, token_cache_file: str) -
             },
         )
         resp.raise_for_status()
-        matches = resp.json()
+        raw = resp.json()
+        # De API geeft een gepagineerd object terug: {"content": [...], ...}
+        # of een kale lijst bij oudere endpoints.
+        if isinstance(raw, dict):
+            matches = raw.get("content") or raw.get("data") or raw.get("matches") or []
+        else:
+            matches = raw
     except Exception as e:
         logger.warning("Playtomic boekingen ophalen mislukt: %s", e)
         return []

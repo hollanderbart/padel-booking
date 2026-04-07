@@ -1,3 +1,8 @@
+## 2.2.3
+
+- Fix: Playtomic boekingen ophalen — API geeft gepagineerd object terug (`{"content": [...]}`) i.p.v. kale lijst; `len()` telde nu keys in de dict waardoor altijd 0 boekingen werden verwerkt
+- Feature: nieuwe configuratie-optie `fetch_bookings_enabled` (standaard `true`) om het ophalen van toekomstige boekingen in/uit te schakelen
+
 ## 2.2.2
 
 - Fix: `playtomic_password` schema type gewijzigd van `str` naar `password` zodat het veld gemaskeerd wordt in de HA configuratie UI

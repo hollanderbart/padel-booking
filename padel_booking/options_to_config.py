@@ -42,6 +42,10 @@ config = {
             "token_cache_file": "/data/.playtomic_token.json",
         },
     },
+    "fetch_bookings": {
+        "enabled": opts.get("fetch_bookings_enabled", True),
+        "output_file": "/config/padel/future_bookings.json",
+    },
     "state": {
         "booking_state_file": "/config/padel/.booking_state.json",
         "history_file": "/config/padel/booking_history.json",

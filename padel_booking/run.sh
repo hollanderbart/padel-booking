@@ -23,4 +23,15 @@ python orchestrator.py --debug
     cp /data/.playtomic_token.json /config/padel/.playtomic_token.json
 
 # Haal toekomstige boekingen op en schrijf naar /config/padel/future_bookings.json
-python fetch_bookings.py --output /config/padel/future_bookings.json || true
+# (alleen als fetch_bookings_enabled: true in de configuratie)
+FETCH_ENABLED=$(python3 -c "
+import yaml
+cfg = yaml.safe_load(open('config.yaml'))
+print('true' if cfg.get('fetch_bookings', {}).get('enabled', True) else 'false')
+" 2>/dev/null || echo "true")
+
+if [ "$FETCH_ENABLED" = "true" ]; then
+    python fetch_bookings.py --output /config/padel/future_bookings.json || true
+else
+    echo "fetch_bookings uitgeschakeld — overgeslagen"
+fi
