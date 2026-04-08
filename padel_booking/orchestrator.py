@@ -249,10 +249,35 @@ async def run_all_providers(provider_requests: list[tuple[str, dict]], debug: bo
 
 
 # ---------------------------------------------------------------------------
+# Toekomstige boekingen — skip_booked_dates
+# ---------------------------------------------------------------------------
+
+def load_future_booking_dates(future_bookings_file: Path) -> set[str]:
+    """
+    Laad de datums uit future_bookings.json en geef ze terug als een set van YYYY-MM-DD strings.
+    Geeft een lege set terug als het bestand niet bestaat of niet leesbaar is.
+    """
+    if not future_bookings_file.exists():
+        return set()
+    try:
+        with open(future_bookings_file) as f:
+            bookings = json.load(f)
+        dates = {b["booked_date"] for b in bookings if b.get("booked_date")}
+        logger.info(
+            "Al geboekte datums uit future_bookings: %s",
+            ", ".join(sorted(dates)) if dates else "(geen)",
+        )
+        return dates
+    except Exception as e:
+        logger.warning("Fout bij lezen future_bookings: %s — skip_booked_dates wordt genegeerd", e)
+        return set()
+
+
+# ---------------------------------------------------------------------------
 # Hoofdflow
 # ---------------------------------------------------------------------------
 
-def build_provider_request(config: dict, credentials: dict, provider_config: dict, dry_run: bool) -> dict:
+def build_provider_request(config: dict, credentials: dict, provider_config: dict, dry_run: bool, skip_dates: set[str] | None = None) -> dict:
     """Stel het request samen dat naar een provider subprocess gestuurd wordt."""
     return {
         "booking_request": {
@@ -264,6 +289,7 @@ def build_provider_request(config: dict, credentials: dict, provider_config: dic
             "court_type": config["booking"].get("court_type", "indoor"),
             "game_type": config["booking"].get("game_type", "double"),
             "weeks_ahead": config["booking"].get("weeks_ahead", 4),
+            "skip_dates": sorted(skip_dates) if skip_dates else [],
         },
         "credentials": credentials,
         "provider_config": provider_config,
@@ -289,6 +315,19 @@ async def main_async(debug: bool, dry_run: bool) -> int:
         write_last_run(last_run_file, success=True)
         return 0
 
+    # skip_booked_dates: sla datums over die al voorkomen in future_bookings.json
+    skip_dates: set[str] = set()
+    fetch_cfg = config.get("fetch_bookings", {})
+    if fetch_cfg.get("skip_booked_dates", False):
+        future_bookings_file = Path(fetch_cfg.get("output_file", "future_bookings.json"))
+        skip_dates = load_future_booking_dates(future_bookings_file)
+        if skip_dates:
+            logger.info("skip_booked_dates ingeschakeld — %d datum(s) worden overgeslagen", len(skip_dates))
+        else:
+            logger.info("skip_booked_dates ingeschakeld — geen bestaande boekingen gevonden")
+    else:
+        logger.info("skip_booked_dates uitgeschakeld")
+
     providers_config = config.get("providers", {})
     provider_requests = []
 
@@ -304,7 +343,7 @@ async def main_async(debug: bool, dry_run: bool) -> int:
         }
         provider_requests.append((
             "meetandplay",
-            build_provider_request(config, credentials, provider_cfg, dry_run),
+            build_provider_request(config, credentials, provider_cfg, dry_run, skip_dates),
         ))
         logger.info("Provider 'meetandplay' ingeschakeld")
     else:
@@ -322,7 +361,7 @@ async def main_async(debug: bool, dry_run: bool) -> int:
         }
         provider_requests.append((
             "playtomic",
-            build_provider_request(config, credentials, provider_cfg, dry_run),
+            build_provider_request(config, credentials, provider_cfg, dry_run, skip_dates),
         ))
         logger.info("Provider 'playtomic' ingeschakeld")
     else:

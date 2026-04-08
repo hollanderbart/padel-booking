@@ -45,6 +45,7 @@ config = {
     "fetch_bookings": {
         "enabled": opts.get("fetch_bookings_enabled", True),
         "output_file": "/config/padel/future_bookings.json",
+        "skip_booked_dates": opts.get("skip_booked_dates", True),
     },
     "state": {
         "booking_state_file": "/config/padel/.booking_state.json",

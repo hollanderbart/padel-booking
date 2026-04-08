@@ -487,15 +487,34 @@ class MeetAndPlayBooker:
 
         weeks_ahead = self._booking.get("weeks_ahead", 4)
         booking_dates = self._get_upcoming_booking_dates(count=weeks_ahead)
+
+        skip_dates = set(self._booking.get("skip_dates", []))
+        if skip_dates:
+            before = len(booking_dates)
+            booking_dates = [d for d in booking_dates if d.strftime("%Y-%m-%d") not in skip_dates]
+            logger.info(
+                "skip_booked_dates: %d datum(s) overgeslagen %s",
+                before - len(booking_dates),
+                sorted(skip_dates),
+            )
+
         logger.info(
             "Zoeken naar tijdsloten voor de komende %d %s-avonden (%s–%s):",
-            weeks_ahead,
+            len(booking_dates),
             self._booking["day"],
             self._booking["time_start"],
             self._booking["time_end"],
         )
         for d in booking_dates:
             logger.info("  - %s", d.strftime("%d-%m-%Y"))
+
+        if not booking_dates:
+            logger.info("Alle doeldata al geboekt — geen verdere actie nodig")
+            return ProviderResult(
+                success=False,
+                provider="meetandplay",
+                error="Alle doeldata al geboekt (skip_booked_dates)",
+            )
 
         browser = None
         context = None
