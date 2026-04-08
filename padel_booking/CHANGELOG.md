@@ -1,3 +1,7 @@
+## 2.2.4
+
+- Fix: boekingsdatum toegevoegd aan push notificatie — was eerder afwezig zodat niet duidelijk was voor welke datum er geboekt was
+
 ## 2.2.3
 
 - Fix: Playtomic boekingen ophalen — API geeft gepagineerd object terug (`{"content": [...]}`) i.p.v. kale lijst; `len()` telde nu keys in de dict waardoor altijd 0 boekingen werden verwerkt

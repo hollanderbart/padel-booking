@@ -86,9 +86,10 @@ class Notifier:
         print(f"{separator}\n")
 
 
-def notify_booking_available(court_name: str, time: str, location: str, payment_url: str = "") -> None:
+def notify_booking_available(court_name: str, time: str, location: str, payment_url: str = "", booked_date: str = "") -> None:
     notifier = Notifier()
-    message = f"{court_name}\n{time}\n{location}"
+    date_line = f"{booked_date}\n" if booked_date else ""
+    message = f"{date_line}{court_name}\n{time}\n{location}"
     if payment_url:
         message += f"\n\nBoek nu: {location.split(' — ')[0]}"
     notifier.send(title="Padelbaan beschikbaar!", message=message, sound=True, url=payment_url)
