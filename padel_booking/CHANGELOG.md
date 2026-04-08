@@ -1,3 +1,9 @@
+## 2.2.9
+
+- Fix: Playtomic `court_type` filter werkte niet — `_find_slot` controleerde het baantype (indoor/outdoor) nooit, waardoor outdoor clubs werden gematcht terwijl `court_type: indoor` was geconfigureerd
+- Fix: Playtomic baannamen werden altijd hardcoded als "Padelbaan" — worden nu correct uitgelezen uit de tenant resources (bijv. "Eric Sarelse Baan #1")
+- Fix: Playtomic clubadres was altijd leeg — `full_address` bestaat niet in de API response; wordt nu samengesteld uit `street` + `city`
+
 ## 2.2.8
 
 - Feature: nieuwe configuratie-optie `skip_booked_dates` (standaard `true`) — als ingeschakeld controleert de orchestrator `future_bookings.json` vóór het zoeken en slaat datums over die al bevestigd geboekt zijn

@@ -13,6 +13,12 @@ from providers.playtomic.client import PlaytomicAuthError, PlaytomicClient
 
 logger = logging.getLogger(__name__)
 
+def _format_address(address: dict) -> str:
+    """Formatteert een Playtomic adres-object naar een leesbare string."""
+    parts = [address.get("street", ""), address.get("city", "")]
+    return ", ".join(p for p in parts if p)
+
+
 WEEKDAYS = {
     "monday": 0, "maandag": 0,
     "tuesday": 1, "dinsdag": 1,
@@ -121,6 +127,15 @@ class PlaytomicBooker:
         time_start = self._booking["time_start"]
         time_end = self._booking["time_end"]
         duration_minutes = int(self._booking.get("duration_minutes", 90))
+        court_type = self._booking.get("court_type", "").lower()  # "indoor" of "outdoor"
+
+        # Bouw resource-map op uit tenant data: resource_id → {name, type}
+        resource_map = {}
+        for r in tenant.get("resources", []):
+            resource_map[r["resource_id"]] = {
+                "name": r.get("name", "Padelbaan"),
+                "type": r.get("properties", {}).get("resource_type", "").lower(),
+            }
 
         start_min = booking_date.strftime("%Y-%m-%dT00:00:00")
         start_max = booking_date.strftime("%Y-%m-%dT23:59:59")
@@ -138,10 +153,21 @@ class PlaytomicBooker:
         window_end = end_h * 60 + end_m
 
         # Response structuur: lijst van court-objecten, elk met:
-        #   { "resource_id": "...", "start_date": "YYYY-MM-DD", "slots": [{"start_time": "HH:MM:SS", "duration": 90}, ...] }
+        #   { "resource_id": "...", "start_date": "YYYY-MM-DD", "slots": [{"start_time": "HH:MM:SS", "duration": 90, "price": "..."}, ...] }
         for court in slots:
             resource_id = court.get("resource_id", "")
             start_date = court.get("start_date", "")  # "YYYY-MM-DD"
+            resource_info = resource_map.get(resource_id, {})
+            resource_name = resource_info.get("name", "Padelbaan")
+            resource_type = resource_info.get("type", "")
+
+            # Filter op baantype als geconfigureerd
+            if court_type and resource_type and resource_type != court_type:
+                logger.debug(
+                    "Baan '%s' overgeslagen: type '%s' ≠ gevraagd '%s'",
+                    resource_name, resource_type, court_type,
+                )
+                continue
 
             for slot in court.get("slots", []):
                 start_time = slot.get("start_time", "")  # "HH:MM:SS"
@@ -157,8 +183,9 @@ class PlaytomicBooker:
                 slot_duration = slot.get("duration", 0)
 
                 logger.debug(
-                    "Slot: %s %s → %02d:%02d, duur=%s min",
-                    start_date, start_time, slot_minutes // 60, slot_minutes % 60, slot_duration
+                    "Slot: %s %s %s → %02d:%02d, duur=%s min",
+                    resource_name, start_date, start_time,
+                    slot_minutes // 60, slot_minutes % 60, slot_duration,
                 )
 
                 if not (window_start <= slot_minutes < window_end):
@@ -169,15 +196,15 @@ class PlaytomicBooker:
 
                 full_start = f"{start_date}T{start_time}"
                 logger.info(
-                    "Playtomic slot gevonden: %s om %s (resource: %s)",
-                    tenant.get("tenant_name"), full_start, resource_id
+                    "Playtomic slot gevonden: %s — %s om %s (resource: %s, type: %s)",
+                    tenant.get("tenant_name"), resource_name, full_start, resource_id, resource_type,
                 )
                 return {
                     "tenant_id": tenant_id,
                     "tenant_name": tenant.get("tenant_name", ""),
-                    "tenant_address": tenant.get("address", {}).get("full_address", ""),
+                    "tenant_address": _format_address(tenant.get("address", {})),
                     "resource_id": resource_id,
-                    "resource_name": "Padelbaan",
+                    "resource_name": resource_name,
                     "start_time": full_start,
                     "duration_minutes": duration_minutes,
                 }
