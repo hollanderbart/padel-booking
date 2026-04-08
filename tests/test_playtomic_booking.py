@@ -318,7 +318,6 @@ class TestPlaytomicBookerRun:
         booker = _make_booker(_make_request(weeks_ahead=1))
         booker._client.search_clubs.return_value = [_make_club()]
         booker._client.get_availability.return_value = _make_availability()
-        # API geeft payment_intent_id terug (nieuwe structuur)
         booker._client.create_payment_intent.return_value = {"payment_intent_id": "intent-123"}
         booker._client.set_payment_method.return_value = {}
         booker._client.confirm_booking.return_value = {}
@@ -329,10 +328,11 @@ class TestPlaytomicBookerRun:
         assert result.provider == "playtomic"
         assert result.booked_date is not None
         assert result.slot_info["club_name"] == "Club A"
-        assert "intent-123" in result.slot_info["payment_url"]
+        # payment_url is de club-URL, niet de intent-URL
+        assert "app.playtomic.io/tenant/t1" in result.slot_info["payment_url"]
 
     def test_succesvolle_boeking_werkt_ook_met_id_veld(self):
-        # Backwards compat: sommige API versies geven 'id' terug
+        # Backwards compat: sommige API versies geven 'id' terug i.p.v. payment_intent_id
         booker = _make_booker(_make_request(weeks_ahead=1))
         booker._client.search_clubs.return_value = [_make_club()]
         booker._client.get_availability.return_value = _make_availability()
@@ -343,7 +343,7 @@ class TestPlaytomicBookerRun:
         result = booker.run()
 
         assert result.success is True
-        assert "intent-456" in result.slot_info["payment_url"]
+        assert "app.playtomic.io/tenant/t1" in result.slot_info["payment_url"]
 
     def test_set_payment_method_ontvangt_intent_response(self):
         booker = _make_booker(_make_request(weeks_ahead=1))
@@ -356,11 +356,25 @@ class TestPlaytomicBookerRun:
 
         booker.run()
 
-        # set_payment_method moet de intent response meekrijgen
-        call_kwargs = booker._client.set_payment_method.call_args
-        assert call_kwargs[1].get("intent_response") == intent_response or (
-            len(call_kwargs[0]) >= 2 and call_kwargs[0][1] == intent_response
-        )
+        # set_payment_method moet de volledige intent response meekrijgen
+        call_args = booker._client.set_payment_method.call_args
+        assert call_args is not None
+        passed_intent = call_args.kwargs.get("intent_response") or (call_args.args[1] if len(call_args.args) >= 2 else None)
+        assert passed_intent == intent_response
+
+    def test_bezet_slot_wordt_overgeslagen_bij_payment_intent_fout(self):
+        """Als create_payment_intent een fout geeft, is het slot bezet — doorgaan naar volgende."""
+        import requests as req_module
+        booker = _make_booker(_make_request(weeks_ahead=1))
+        booker._client.search_clubs.return_value = [_make_club()]
+        booker._client.get_availability.return_value = _make_availability()
+        # Simuleer een 409 Conflict (slot al bezet)
+        booker._client.create_payment_intent.side_effect = Exception("409 Conflict: slot not available")
+
+        result = booker.run()
+
+        assert result.success is False
+        assert "Geen beschikbaar slot" in result.error
 
     def test_booking_fout_gaat_door_naar_volgende_club(self):
         booker = _make_booker(_make_request(weeks_ahead=1))

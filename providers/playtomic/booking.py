@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from providers.base import ProviderResult
-from providers.playtomic.client import PlaytomicAuthError, PlaytomicClient
+from providers.playtomic.client import NoSuitablePaymentMethodError, PlaytomicAuthError, PlaytomicClient
 
 logger = logging.getLogger(__name__)
 
@@ -287,14 +287,6 @@ class PlaytomicBooker:
                 if not slot_info:
                     continue
 
-                if self._dry_run:
-                    logger.info("Dry-run: slot gevonden maar boeking overgeslagen")
-                    return ProviderResult(
-                        success=False,
-                        provider="playtomic",
-                        error="dry_run — slot gevonden maar niet geboekt",
-                    )
-
                 start_dt = datetime.fromisoformat(slot_info["start_time"])
                 time_str = start_dt.strftime("%H:%M")
                 end_dt = start_dt + timedelta(minutes=slot_info["duration_minutes"])
@@ -308,8 +300,58 @@ class PlaytomicBooker:
                 )
 
                 logger.info(
-                    "Beschikbaar slot gevonden bij %s op %s %s-%s — %s",
-                    slot_info["tenant_name"], date_str, time_str, end_str, club_url,
+                    "Kandidaat slot bij %s — %s op %s %s-%s, bevestigen via payment intent...",
+                    slot_info["tenant_name"], slot_info["resource_name"], date_str, time_str, end_str,
+                )
+
+                if self._dry_run:
+                    logger.info("Dry-run: kandidaat slot gevonden maar boeking overgeslagen")
+                    return ProviderResult(
+                        success=False,
+                        provider="playtomic",
+                        error="dry_run — slot gevonden maar niet geboekt",
+                    )
+
+                # Valideer en boek via payment intent — de availability API geeft
+                # het rooster terug, niet de echte bezetting. De payment intent
+                # geeft een 4xx als het slot al bezet is.
+                try:
+                    intent = self._client.create_payment_intent(
+                        tenant_id=slot_info["tenant_id"],
+                        resource_id=slot_info["resource_id"],
+                        start_time=slot_info["start_time"],
+                        duration_minutes=slot_info["duration_minutes"],
+                    )
+                except Exception as e:
+                    logger.info(
+                        "Slot %s %s-%s bij %s is niet beschikbaar: %s — volgende proberen",
+                        date_str, time_str, end_str, slot_info["tenant_name"], e,
+                    )
+                    continue
+
+                intent_id = intent.get("payment_intent_id") or intent.get("id")
+                if not intent_id:
+                    logger.warning("Payment intent heeft geen ID — slot overgeslagen")
+                    continue
+
+                try:
+                    intent_resp = self._client.set_payment_method(intent_id, intent_response=intent)
+                except NoSuitablePaymentMethodError as e:
+                    logger.info("Geen geschikte betaalmethode voor %s: %s — volgende proberen", slot_info["tenant_name"], e)
+                    continue
+                except Exception as e:
+                    logger.warning("Betaalmethode instellen mislukt voor %s: %s — volgende proberen", slot_info["tenant_name"], e)
+                    continue
+
+                try:
+                    self._client.confirm_booking(intent_id)
+                except Exception as e:
+                    logger.warning("Boeking bevestigen mislukt voor %s: %s — volgende proberen", slot_info["tenant_name"], e)
+                    continue
+
+                logger.info(
+                    "Boeking bevestigd bij %s op %s %s-%s",
+                    slot_info["tenant_name"], date_str, time_str, end_str,
                 )
 
                 return ProviderResult(
@@ -328,5 +370,5 @@ class PlaytomicBooker:
         return ProviderResult(
             success=False,
             provider="playtomic",
-            error=f"Geen slot gevonden op Playtomic voor {len(booking_dates)} datum(s)",
+            error=f"Geen beschikbaar slot op Playtomic voor {len(booking_dates)} datum(s)",
         )

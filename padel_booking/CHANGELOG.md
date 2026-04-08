@@ -1,3 +1,7 @@
+## 2.2.10
+
+- Fix: Playtomic `/v1/availability` geeft het rooster terug, niet de echte bezetting — een slot in de response betekent niet dat het vrij is. De code probeert nu een `payment_intent` aan te maken als validatie; een 4xx betekent dat het slot al bezet is en de code gaat door naar het volgende slot/club
+
 ## 2.2.9
 
 - Fix: Playtomic `court_type` filter werkte niet — `_find_slot` controleerde het baantype (indoor/outdoor) nooit, waardoor outdoor clubs werden gematcht terwijl `court_type: indoor` was geconfigureerd
