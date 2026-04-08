@@ -1,3 +1,7 @@
+## 2.2.6
+
+- Fix: baan en tijdstip samengevoegd tot één regel in push notificatie (bijv. "Baan 3 — 19:30 - 21:00")
+
 ## 2.2.5
 
 - Fix: provider naam toegevoegd aan push notificatie (bijv. "via playtomic")
