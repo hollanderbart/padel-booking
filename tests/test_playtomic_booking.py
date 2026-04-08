@@ -50,14 +50,22 @@ def _make_booker(request: dict = None) -> PlaytomicBooker:
     return booker
 
 
-def _make_club(tenant_id="t1", name="Club A", lat=52.07, lon=4.65, address="Straat 1") -> dict:
+def _make_club(tenant_id="t1", name="Club A", lat=52.07, lon=4.65, address="Straat 1", resource_id="r1", resource_type="indoor") -> dict:
     return {
         "tenant_id": tenant_id,
         "tenant_name": name,
         "address": {
-            "full_address": address,
+            "street": address,
+            "city": "Teststad",
             "geo_location": {"lat": lat, "lon": lon},
         },
+        "resources": [
+            {
+                "resource_id": resource_id,
+                "name": "Baan 1",
+                "properties": {"resource_type": resource_type},
+            }
+        ],
     }
 
 
@@ -259,14 +267,14 @@ class TestFindSlot:
 
     def test_slot_bevat_resource_en_tenant_info(self):
         booker = _make_booker(_make_request(time_start="19:30", time_end="21:00", duration=90))
-        club = _make_club(tenant_id="t99", name="Club Speciaal", address="Bijzondere Laan 1")
+        club = _make_club(tenant_id="t99", name="Club Speciaal", address="Bijzondere Laan 1", resource_id="res-42")
         availability = _make_availability(start_time="19:30:00", duration=90, resource_id="res-42")
         booker._client.get_availability.return_value = availability
 
         result = booker._find_slot(club, datetime(2026, 4, 10))
         assert result["tenant_id"] == "t99"
         assert result["tenant_name"] == "Club Speciaal"
-        assert result["tenant_address"] == "Bijzondere Laan 1"
+        assert result["tenant_address"] == "Bijzondere Laan 1, Teststad"
         assert result["resource_id"] == "res-42"
 
 

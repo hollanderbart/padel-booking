@@ -174,7 +174,7 @@ def fetch_playtomic_bookings(email: str, password: str, token_cache_file: str) -
             tenant = match.get("tenant", {}) or {}
             club_name = tenant.get("tenant_name", "") or match.get("tenant_name", "")
             address = tenant.get("address", {}) or {}
-            club_address = address.get("full_address", "") or ""
+            club_address = address.get("full_address") or ", ".join(filter(None, [address.get("street", ""), address.get("city", "")]))
 
             # Court info
             resource = match.get("resource", {}) or {}
