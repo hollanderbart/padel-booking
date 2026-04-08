@@ -16,7 +16,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -51,20 +51,43 @@ def load_config(config_path: str = CONFIG_PATH) -> dict:
 # Deduplicatie
 # ---------------------------------------------------------------------------
 
-def is_already_booked(state_file: Path) -> bool:
+WEEKDAYS = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+
+
+def _get_furthest_target_date(booking_cfg: dict) -> datetime.date:
+    """Bereken de verste doeldatum in het zoekvenster (weeks_ahead weken vooruit)."""
+    target_day_name = booking_cfg.get("day", "thursday").lower()
+    target_weekday = WEEKDAYS.get(target_day_name, 3)
+    weeks_ahead = booking_cfg.get("weeks_ahead", 4)
+
+    today = datetime.now()
+    days_ahead = (target_weekday - today.weekday()) % 7 or 7
+    first_date = (today + timedelta(days=days_ahead)).date()
+    return first_date + timedelta(weeks=weeks_ahead - 1)
+
+
+def is_already_booked(state_file: Path, booking_cfg: dict) -> bool:
     if not state_file.exists():
         return False
     try:
         with open(state_file) as f:
             state = json.load(f)
         booked_date = datetime.strptime(state["booked_date"], "%Y-%m-%d").date()
-        today = datetime.now().date()
-        if booked_date >= today:
-            logger.info("Al geboekt voor %s — boeking overgeslagen", booked_date.isoformat())
+        furthest_date = _get_furthest_target_date(booking_cfg)
+        if booked_date >= furthest_date:
+            logger.info(
+                "Al geboekt voor %s (verste doeldatum: %s) — boeking overgeslagen",
+                booked_date.isoformat(),
+                furthest_date.isoformat(),
+            )
             return True
         logger.info(
-            "Vorige boeking (%s) is verlopen — nieuwe boeking starten",
+            "Boeking voor %s — nog niet de verste doeldatum (%s), doorgaan met zoeken",
             booked_date.isoformat(),
+            furthest_date.isoformat(),
         )
         return False
     except Exception as e:
@@ -262,7 +285,7 @@ async def main_async(debug: bool, dry_run: bool) -> int:
     logger.info("Padel Booking Orchestrator gestart")
     logger.info("=" * 60)
 
-    if not dry_run and is_already_booked(state_file):
+    if not dry_run and is_already_booked(state_file, config.get("booking", {})):
         write_last_run(last_run_file, success=True)
         return 0
 

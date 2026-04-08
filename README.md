@@ -239,7 +239,7 @@ Het bestand bevat maximaal 20 entries. De nieuwste boeking staat bovenaan.
 
 ## Boeking resetten (opnieuw zoeken forceren)
 
-Na een gevonden slot slaat de addon de boekingsdatum op in `/config/padel/.booking_state.json`. Zolang dit bestand bestaat en de datum in de toekomst ligt, slaat de addon volgende runs over. Met een knop op het dashboard kun je dit bestand wissen zodat de addon opnieuw gaat zoeken.
+Na een gevonden slot slaat de addon de boekingsdatum op in `/config/padel/.booking_state.json`. Volgende runs worden overgeslagen zodra de verste doeldatum (het aantal weken vooruit in `weeks_ahead`) al geboekt is. Als er nog latere Thursdays in het zoekvenster zitten die nog niet geboekt zijn, gaat de addon gewoon door met zoeken. Met een knop op het dashboard kun je het state-bestand wissen om het zoeken volledig te resetten.
 
 ### Stap 1 — Voeg de shell_command toe aan `configuration.yaml`
 

@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from orchestrator import (
+    _get_furthest_target_date,
     append_booking_history,
     build_provider_request,
     is_already_booked,
@@ -92,35 +93,53 @@ class TestLoadConfig:
 # ---------------------------------------------------------------------------
 
 class TestIsAlreadyBooked:
+    # booking_cfg met een dag ver in de toekomst zodat furthest_target_date altijd
+    # minstens weeks_ahead weken vooruit ligt — onafhankelijk van de dag waarop de test draait.
+    BOOKING_CFG = {"day": "thursday", "weeks_ahead": 4}
+
     def test_geen_bestand_retourneert_false(self, tmp_path):
-        assert is_already_booked(tmp_path / "geen.json") is False
+        assert is_already_booked(tmp_path / "geen.json", self.BOOKING_CFG) is False
 
-    def test_toekomstige_datum_retourneert_true(self, tmp_path):
+    def test_verste_doeldatum_geboekt_retourneert_true(self, tmp_path):
+        """Als de boekingsdatum >= de verste doeldatum is, overslaan."""
+        from orchestrator import _get_furthest_target_date
+        furthest = _get_furthest_target_date(self.BOOKING_CFG)
         f = tmp_path / "state.json"
-        future = (date.today() + timedelta(days=3)).isoformat()
-        f.write_text(json.dumps({"booked_date": future}))
-        assert is_already_booked(f) is True
+        f.write_text(json.dumps({"booked_date": furthest.isoformat()}))
+        assert is_already_booked(f, self.BOOKING_CFG) is True
 
-    def test_datum_is_vandaag_retourneert_true(self, tmp_path):
+    def test_datum_voorbij_verste_doeldatum_retourneert_true(self, tmp_path):
+        from orchestrator import _get_furthest_target_date
+        furthest = _get_furthest_target_date(self.BOOKING_CFG)
+        ver_weg = (furthest + timedelta(weeks=2)).isoformat()
         f = tmp_path / "state.json"
-        f.write_text(json.dumps({"booked_date": date.today().isoformat()}))
-        assert is_already_booked(f) is True
+        f.write_text(json.dumps({"booked_date": ver_weg}))
+        assert is_already_booked(f, self.BOOKING_CFG) is True
+
+    def test_datum_voor_verste_doeldatum_retourneert_false(self, tmp_path):
+        """Als er nog latere data in het zoekvenster zitten, doorgaan met zoeken."""
+        from orchestrator import _get_furthest_target_date
+        furthest = _get_furthest_target_date(self.BOOKING_CFG)
+        eerder = (furthest - timedelta(weeks=1)).isoformat()
+        f = tmp_path / "state.json"
+        f.write_text(json.dumps({"booked_date": eerder}))
+        assert is_already_booked(f, self.BOOKING_CFG) is False
 
     def test_verleden_datum_retourneert_false(self, tmp_path):
         f = tmp_path / "state.json"
         past = (date.today() - timedelta(days=1)).isoformat()
         f.write_text(json.dumps({"booked_date": past}))
-        assert is_already_booked(f) is False
+        assert is_already_booked(f, self.BOOKING_CFG) is False
 
     def test_corrupt_json_retourneert_false(self, tmp_path):
         f = tmp_path / "state.json"
         f.write_text("GEEN_JSON{{{")
-        assert is_already_booked(f) is False
+        assert is_already_booked(f, self.BOOKING_CFG) is False
 
     def test_ontbrekend_booked_date_veld_retourneert_false(self, tmp_path):
         f = tmp_path / "state.json"
         f.write_text(json.dumps({"provider": "meetandplay"}))
-        assert is_already_booked(f) is False
+        assert is_already_booked(f, self.BOOKING_CFG) is False
 
 
 # ---------------------------------------------------------------------------
