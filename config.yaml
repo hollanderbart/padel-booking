@@ -22,6 +22,11 @@ providers:
     enabled: false
     token_cache_file: .playtomic_token.json
 
+fetch_bookings:
+  enabled: true
+  output_file: future_bookings.json
+  skip_booked_dates: true  # sla datums over die al in future_bookings.json staan
+
 state:
   booking_state_file: .booking_state.json
   history_file: booking_history.json

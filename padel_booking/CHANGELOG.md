@@ -1,3 +1,7 @@
+## 2.2.8
+
+- Feature: nieuwe configuratie-optie `skip_booked_dates` (standaard `true`) — als ingeschakeld controleert de orchestrator `future_bookings.json` vóór het zoeken en slaat datums over die al bevestigd geboekt zijn
+
 ## 2.2.7
 
 - Fix: deduplicatie blokkeerde te vroeg — boekingen werden overgeslagen zodra *enige* toekomstige datum al geboekt was, ook als er nog latere data in het zoekvenster zaten. Nu wordt pas overgeslagen als de verste doeldatum (weeks_ahead weken vooruit) al geboekt is.

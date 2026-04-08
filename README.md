@@ -64,6 +64,7 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 | `meetandplay_enabled` | Meet & Play provider in/uitschakelen (standaard `true`) |
 | `playtomic_enabled` | Playtomic provider in/uitschakelen (standaard `false`) |
 | `fetch_bookings_enabled` | Toekomstige boekingen ophalen en opslaan naar `/config/padel/future_bookings.json` (standaard `true`) |
+| `skip_booked_dates` | Sla datums over die al voorkomen in `future_bookings.json` voordat er gezocht wordt (standaard `true`) |
 | `playtomic_email` | E-mailadres van je Playtomic account (vereist als Playtomic ingeschakeld) |
 | `playtomic_password` | Wachtwoord van je Playtomic account (vereist als Playtomic ingeschakeld) |
 
