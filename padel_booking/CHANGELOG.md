@@ -1,3 +1,7 @@
+## 2.2.5
+
+- Fix: provider naam toegevoegd aan push notificatie (bijv. "via playtomic")
+
 ## 2.2.4
 
 - Fix: boekingsdatum toegevoegd aan push notificatie — was eerder afwezig zodat niet duidelijk was voor welke datum er geboekt was
