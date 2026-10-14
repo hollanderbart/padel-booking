@@ -12,6 +12,7 @@ from playwright.sync_api import Browser, BrowserContext, Locator, Page, sync_pla
 
 from providers.base import (
     ProviderResult,
+    booking_days,
     hhmm_to_minutes,
     upcoming_booking_dates,
     without_skip_dates,
@@ -65,7 +66,7 @@ class MeetAndPlayBooker:
     # ------------------------------------------------------------------
 
     def _get_upcoming_booking_dates(self, count: int = 3) -> list[datetime]:
-        return upcoming_booking_dates(self._booking["day"], self._booking["time_start"], count)
+        return upcoming_booking_dates(booking_days(self._booking), self._booking["time_start"], count)
 
     def _candidate_dates(self) -> list[datetime]:
         """Op te zoeken datums: de opgegeven datums bij een gerichte run, anders de komende weken."""
@@ -507,7 +508,7 @@ class MeetAndPlayBooker:
         logger.info(
             "Zoeken naar tijdsloten voor de komende %d %s-avonden (%s–%s):",
             len(booking_dates),
-            self._booking["day"],
+            "/".join(booking_days(self._booking)),
             self._booking["time_start"],
             self._booking["time_end"],
         )

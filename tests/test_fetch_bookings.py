@@ -2,31 +2,16 @@
 Unit tests voor fetch_bookings.py — geen browser of netwerk nodig.
 """
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from datetime import date
+from unittest.mock import patch
 
 from fetch_bookings import (
-    _first_text,
-    _parse_dutch_date,
+    _infer_date,
+    _parse_order_card,
     _playtomic_match_to_booking,
     fetch_playtomic_bookings,
 )
 from providers.playtomic.client import PlaytomicAuthError
-
-
-class TestParseDutchDate:
-    @pytest.mark.parametrize(("raw", "expected"), [
-        ("2026-04-03", "2026-04-03"),
-        ("3-4-2026", "2026-04-03"),
-        ("03/04/2026", "2026-04-03"),
-        ("donderdag 3 april 2026", "2026-04-03"),
-        ("Vr 17 okt 2026", "2026-10-17"),
-        ("3 smarch 2026", ""),
-        ("geen datum", ""),
-    ])
-    def test_formaten(self, raw, expected):
-        assert _parse_dutch_date(raw) == expected
 
 
 class TestPlaytomicMatchToBooking:
@@ -66,22 +51,90 @@ class TestFetchPlaytomicBookings:
     def test_auth_fout_geeft_lege_lijst(self, tmp_path):
         with patch("fetch_bookings.PlaytomicClient") as MockClient:
             MockClient.return_value.get_upcoming_matches.side_effect = PlaytomicAuthError("nee")
-            assert fetch_playtomic_bookings("a@b.nl", "pw", str(tmp_path / "t.json")) == []
+            assert fetch_playtomic_bookings("a@b.nl", "pw", str(tmp_path / "t.json")) is None
 
     def test_netwerkfout_geeft_lege_lijst(self, tmp_path):
         with patch("fetch_bookings.PlaytomicClient") as MockClient:
             MockClient.return_value.get_upcoming_matches.side_effect = OSError("timeout")
-            assert fetch_playtomic_bookings("a@b.nl", "pw", str(tmp_path / "t.json")) == []
+            assert fetch_playtomic_bookings("a@b.nl", "pw", str(tmp_path / "t.json")) is None
 
 
-class TestFirstText:
-    def test_eerste_niet_lege_selector_wint(self):
-        def locator(selector):
-            loc = MagicMock()
-            loc.count.return_value = 1
-            loc.first.inner_text.return_value = {".a": "  ", ".b": "Club X\nextra"}[selector]
-            return loc
+class _FakeLocator:
+    """Minimale Playwright-locator: een lijst teksten per selector."""
 
-        card = MagicMock()
-        card.locator.side_effect = locator
-        assert _first_text(card, [".a", ".b"], first_line=True) == "Club X"
+    def __init__(self, texts: list[str]):
+        self._texts = texts
+        self.first = self._Item(texts[0] if texts else "")
+        self.last = self._Item(texts[-1] if texts else "")
+
+    class _Item:
+        def __init__(self, text):
+            self._text = text
+
+        def inner_text(self):
+            return self._text
+
+    def count(self):
+        return len(self._texts)
+
+
+class _FakeCard:
+    def __init__(self, fields: dict[str, list[str]], href: str = ""):
+        self._fields = fields
+        self._href = href
+
+    def locator(self, selector):
+        return _FakeLocator(self._fields.get(selector, []))
+
+    def get_attribute(self, name):
+        return self._href if name == "href" else None
+
+    def inner_text(self):
+        return " ".join(t for texts in self._fields.values() for t in texts)
+
+
+def _order_card(day="22", month="okt", status="Betaald"):
+    """Opbouw van een kaart op meetandplay.nl/mijn-aankopen (oktober 2026)."""
+    return _FakeCard({
+        ".timeslot-date-day": [day],
+        ".timeslot-date-month": [month],
+        ".timeslot-time": ["20:00 - 21:30\n\n 90 minuten"],
+        ".timeslot-name": ["Padelbaan 4 - Tennis en Padel Meerzicht\n4 spelers - Tennis en Padel Meerzicht", status],
+    }, href="https://meetandplay.nl/mijn-aankopen/order/28541/abc")
+
+
+class TestInferDate:
+    def test_later_dit_jaar(self):
+        assert _infer_date(22, 10, date(2026, 10, 14)) == date(2026, 10, 22)
+
+    def test_vandaag_telt_mee(self):
+        assert _infer_date(14, 10, date(2026, 10, 14)) == date(2026, 10, 14)
+
+    def test_jaarwisseling(self):
+        assert _infer_date(8, 1, date(2026, 12, 20)) == date(2027, 1, 8)
+
+
+class TestParseOrderCard:
+    TODAY = date(2026, 10, 14)
+
+    def test_betaalde_reservering(self):
+        booking = _parse_order_card(_order_card(), self.TODAY)
+        assert booking == {
+            "booked_date": "2026-10-22",
+            "provider": "meetandplay",
+            "club_name": "Tennis en Padel Meerzicht",
+            "club_address": "",
+            "court_name": "Padelbaan 4",
+            "time_range": "20:00 - 21:30",
+            "payment_url": "https://meetandplay.nl/mijn-aankopen/order/28541/abc",
+            "status": "betaald",
+        }
+
+    def test_geannuleerde_reservering_telt_niet(self):
+        assert _parse_order_card(_order_card(status="Geannuleerd"), self.TODAY) is None
+
+    def test_onbekende_maand_geeft_none(self):
+        assert _parse_order_card(_order_card(month="xyz"), self.TODAY) is None
+
+    def test_maand_met_punt(self):
+        assert _parse_order_card(_order_card(month="Nov."), self.TODAY)["booked_date"] == "2026-11-22"

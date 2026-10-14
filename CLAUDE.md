@@ -65,7 +65,7 @@ padel-booking/
 │   ├── booking_config.yaml          # standaard booking configuratie
 │   └── CHANGELOG.md
 ├── orchestrator.py                  # hoofdscript — coördineert providers
-├── fetch_bookings.py                # haalt toekomstige boekingen op
+├── fetch_bookings.py                # haalt reserveringen uit je account op (M&P: /mijn-aankopen)
 ├── scheduler.py                     # plant runs op de vrijgavemomenten per club (schedule_mode: smart)
 ├── notify.py                        # notificaties (HA push + macOS + console)
 ├── providers/

@@ -27,10 +27,8 @@ if [ "$MODE" = "smart" ]; then
 fi
 
 # nightly: één run per start van de addon (bijv. via een HA automation om 00:01).
-# Exit code 1 betekent "geen boeking gemaakt" en mag het script niet afbreken.
-python orchestrator.py --debug || echo "Geen boeking gemaakt (exit $?)"
-
-# Haal toekomstige boekingen op en schrijf naar /config/padel/future_bookings.json
+# Eerst de reserveringen uit je account ophalen (/config/padel/future_bookings.json),
+# zodat de booker datums overslaat die al geboekt zijn.
 FETCH_ENABLED=$(python3 -c "
 import yaml
 cfg = yaml.safe_load(open('config.yaml'))
@@ -42,3 +40,6 @@ if [ "$FETCH_ENABLED" = "true" ]; then
 else
     echo "fetch_bookings uitgeschakeld — overgeslagen"
 fi
+
+# Exit code 1 betekent "geen boeking gemaakt" en mag het script niet afbreken.
+python orchestrator.py --debug || echo "Geen boeking gemaakt (exit $?)"

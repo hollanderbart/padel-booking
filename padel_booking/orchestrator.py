@@ -27,7 +27,7 @@ import yaml
 from dotenv import load_dotenv
 
 from notify import notify_booking_available
-from providers.base import upcoming_booking_dates
+from providers.base import booking_days, upcoming_booking_dates
 
 logger = logging.getLogger(__name__)
 
@@ -113,44 +113,8 @@ def _write_json(path: Path, data, what: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Deduplicatie
+# Boekingsstate
 # ---------------------------------------------------------------------------
-
-def _get_furthest_target_date(booking_cfg: dict) -> date:
-    """Bereken de verste doeldatum in het zoekvenster — dezelfde datums als de providers doorzoeken."""
-    dates = upcoming_booking_dates(
-        booking_cfg.get("day", "thursday"),
-        booking_cfg.get("time_start", "00:00"),
-        count=booking_cfg.get("weeks_ahead", 4),
-    )
-    return dates[-1].date()
-
-
-def is_already_booked(state_file: Path, booking_cfg: dict) -> bool:
-    if not state_file.exists():
-        return False
-    try:
-        with open(state_file, encoding="utf-8") as f:
-            state = json.load(f)
-        booked_date = datetime.strptime(state["booked_date"], "%Y-%m-%d").date()
-        furthest_date = _get_furthest_target_date(booking_cfg)
-        if booked_date >= furthest_date:
-            logger.info(
-                "Al geboekt voor %s (verste doeldatum: %s) — boeking overgeslagen",
-                booked_date.isoformat(),
-                furthest_date.isoformat(),
-            )
-            return True
-        logger.info(
-            "Boeking voor %s — nog niet de verste doeldatum (%s), doorgaan met zoeken",
-            booked_date.isoformat(),
-            furthest_date.isoformat(),
-        )
-        return False
-    except Exception as e:  # noqa: BLE001 — corrupte state mag een boeking nooit blokkeren
-        logger.warning("Fout bij lezen booking state: %s — doorgaan met boeken", e)
-        return False
-
 
 def save_booking_state(state_file: Path, booked_date: str, slot_info: dict, provider: str) -> None:
     state = {
@@ -289,12 +253,12 @@ async def run_all_providers(provider_requests: list[tuple[str, dict]], debug: bo
 
 
 # ---------------------------------------------------------------------------
-# Toekomstige boekingen — skip_booked_dates
+# Al geboekte datums
 # ---------------------------------------------------------------------------
 
 def load_future_booking_dates(future_bookings_file: Path) -> set[str]:
     """
-    Laad de datums uit future_bookings.json en geef ze terug als een set van YYYY-MM-DD strings.
+    Datums met een reservering in je account (future_bookings.json, gevuld door fetch_bookings.py).
     Geeft een lege set terug als het bestand niet bestaat of niet leesbaar is.
     """
     if not future_bookings_file.exists():
@@ -311,6 +275,40 @@ def load_future_booking_dates(future_bookings_file: Path) -> set[str]:
     except Exception as e:  # noqa: BLE001
         logger.warning("Fout bij lezen future_bookings: %s — skip_booked_dates wordt genegeerd", e)
         return set()
+
+
+def load_handled_dates(history_file: Path, today: date | None = None) -> set[str]:
+    """
+    Toekomstige datums waarvoor de bot al een slot gevonden heeft (booking_history.json).
+    Ook als de betaling nog open staat: zo komt er geen tweede betaallink voor dezelfde avond.
+    """
+    today_iso = (today or date.today()).isoformat()
+    try:
+        with open(history_file, encoding="utf-8") as f:
+            history = json.load(f)
+    except FileNotFoundError:
+        return set()
+    except (OSError, ValueError) as e:
+        logger.warning("Fout bij lezen boekingsgeschiedenis: %s", e)
+        return set()
+    dates = {
+        e["booked_date"] for e in history
+        if isinstance(e, dict) and e.get("booked_date", "") >= today_iso
+    }
+    if dates:
+        logger.info("Datums met een eerder gevonden slot (boekingsgeschiedenis): %s", ", ".join(sorted(dates)))
+    return dates
+
+
+def open_dates(booking_cfg: dict, skip_dates: set[str], now: datetime | None = None) -> list[str]:
+    """Doeldatums (alle gekozen weekdagen, weeks_ahead weken vooruit) zonder boeking."""
+    dates = upcoming_booking_dates(
+        booking_days(booking_cfg),
+        booking_cfg.get("time_start", "00:00"),
+        count=booking_cfg.get("weeks_ahead", 4),
+        now=now,
+    )
+    return [d for d in (d.strftime("%Y-%m-%d") for d in dates) if d not in skip_dates]
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +332,7 @@ def build_provider_request(
     request = {
         "booking_request": {
             "location": config["location"],
-            "day": config["booking"]["day"],
+            "days": booking_days(config["booking"]),
             "time_start": config["booking"]["time_start"],
             "time_end": config["booking"]["time_end"],
             "duration_minutes": config["booking"].get("duration_minutes", 90),
@@ -353,26 +351,17 @@ def build_provider_request(
     return request
 
 
-def _state_booked_date(state_file: Path) -> str | None:
-    try:
-        with open(state_file, encoding="utf-8") as f:
-            return json.load(f).get("booked_date")
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
-def _remaining_target(target: dict, skip_dates: set[str], state_file: Path) -> dict | None:
+def _remaining_target(target: dict, skip_dates: set[str]) -> dict | None:
     """Haal datums die al geboekt zijn uit een gerichte run; None als er niets overblijft."""
-    booked = skip_dates | {d for d in [_state_booked_date(state_file)] if d}
-    dates = [d for d in target.get("dates", []) if d not in booked]
+    dates = [d for d in target.get("dates", []) if d not in skip_dates]
     if not dates:
         logger.info("Gerichte run overgeslagen — %s al geboekt", ", ".join(target.get("dates", [])))
         return None
     return {**target, "dates": dates}
 
 
-def _load_skip_dates(config: dict) -> set[str]:
-    """skip_booked_dates: datums die al voorkomen in future_bookings.json."""
+def _load_account_dates(config: dict) -> set[str]:
+    """skip_booked_dates: datums met een reservering in je account (future_bookings.json)."""
     fetch_cfg = config.get("fetch_bookings", {})
     if not fetch_cfg.get("skip_booked_dates", False):
         logger.info("skip_booked_dates uitgeschakeld")
@@ -398,6 +387,26 @@ def _print_summary(provider: str, slot_info: dict) -> None:
     print("=" * 60 + "\n")
 
 
+def _handle_success(result: dict, dry_run: bool, state_file: Path, history_file: Path) -> None:
+    provider = result["provider"]
+    booked_date = result["booked_date"]
+    slot_info = result["slot_info"]
+
+    if not dry_run:
+        save_booking_state(state_file, booked_date, slot_info, provider)
+        append_booking_history(history_file, booked_date, slot_info, provider)
+
+    notify_booking_available(
+        slot_info["court_name"],
+        slot_info["time_range"],
+        f"{slot_info['club_name']} — {slot_info['club_address']}",
+        slot_info.get("payment_url", ""),
+        booked_date,
+        provider,
+    )
+    _print_summary(provider, slot_info)
+
+
 async def main_async(debug: bool, dry_run: bool, target: dict | None = None) -> int:
     load_dotenv()
 
@@ -412,56 +421,59 @@ async def main_async(debug: bool, dry_run: bool, target: dict | None = None) -> 
     logger.info("Padel Booking Orchestrator gestart")
     logger.info("=" * 60)
 
-    skip_dates = _load_skip_dates(config)
+    # Al geboekt: reserveringen in je account + datums waarvoor de bot al een slot vond
+    skip_dates = _load_account_dates(config) | load_handled_dates(history_file)
     providers = enabled_providers(config)
 
     if target:
         logger.info("Gerichte run: %s bij %s", ", ".join(target.get("dates", [])),
                     ", ".join(c.get("name", "?") for c in target.get("clubs", [])) or "alle clubs")
-        target = _remaining_target(target, skip_dates, state_file)
+        target = _remaining_target(target, skip_dates)
         if target is None:
             return 0
         providers = [p for p in providers if p[0].name == target.get("provider", "meetandplay")]
-    elif not dry_run and is_already_booked(state_file, config.get("booking", {})):
-        write_last_run(last_run_file, success=True)
-        return 0
+        remaining = list(target["dates"])
+    else:
+        remaining = open_dates(config["booking"], skip_dates)
+        if not remaining:
+            logger.info("Alle doeldatums zijn al geboekt — niets te doen")
+            write_last_run(last_run_file, success=True)
+            return 0
+        logger.info("Nog te boeken: %s", ", ".join(remaining))
 
-    provider_requests = [
-        (spec.name, build_provider_request(config, credentials, provider_cfg, dry_run, skip_dates, target))
-        for spec, credentials, provider_cfg in providers
-    ]
-
-    if not provider_requests:
+    if not providers:
         logger.error("Geen providers ingeschakeld — controleer config.yaml")
         write_last_run(last_run_file, success=False)
         return 1
 
-    result = await run_all_providers(provider_requests, debug=debug)
+    # Boek alle open datums: na elke boeking zoeken de providers verder zonder die datum
+    winners = []
+    for _ in range(len(remaining)):
+        provider_requests = [
+            (spec.name, build_provider_request(config, credentials, provider_cfg, dry_run, skip_dates, target))
+            for spec, credentials, provider_cfg in providers
+        ]
+        result = await run_all_providers(provider_requests, debug=debug)
+        if not (result and result.get("success")):
+            break
+        _handle_success(result, dry_run, state_file, history_file)
+        winners.append(result["provider"])
+        skip_dates.add(result["booked_date"])
+        remaining = [d for d in remaining if d != result["booked_date"]]
+        if not remaining:
+            break
+        if target:
+            target = {**target, "dates": remaining}
+        logger.info("Verder zoeken voor: %s", ", ".join(remaining))
 
-    if not (result and result.get("success")):
+    if not winners:
         logger.warning("Geen boeking gemaakt door alle providers")
         write_last_run(last_run_file, success=False)
         return 1
 
-    provider = result["provider"]
-    booked_date = result["booked_date"]
-    slot_info = result["slot_info"]
-
-    if not dry_run:
-        save_booking_state(state_file, booked_date, slot_info, provider)
-        append_booking_history(history_file, booked_date, slot_info, provider)
-
-    write_last_run(last_run_file, success=True, provider=provider)
-
-    notify_booking_available(
-        slot_info["court_name"],
-        slot_info["time_range"],
-        f"{slot_info['club_name']} — {slot_info['club_address']}",
-        slot_info.get("payment_url", ""),
-        booked_date,
-        provider,
-    )
-    _print_summary(provider, slot_info)
+    logger.info("%d boeking(en) gevonden%s", len(winners),
+                f" — geen slot voor {', '.join(remaining)}" if remaining else "")
+    write_last_run(last_run_file, success=True, provider=winners[-1])
     return 0
 
 

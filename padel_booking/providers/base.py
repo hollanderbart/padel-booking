@@ -65,29 +65,41 @@ def hhmm_to_minutes(value: str) -> int:
     return int(hours) * 60 + int(minutes)
 
 
+def booking_days(booking_cfg: dict) -> list[str]:
+    """
+    Weekdagen uit de booking-config: `days` (lijst) of het oude `day` (één dag).
+    Volgorde en dubbelen worden genormaliseerd naar maandag → zondag.
+    """
+    days = booking_cfg.get("days") or booking_cfg.get("day") or "thursday"
+    if isinstance(days, str):
+        days = [days]
+    for day in days:
+        if day.lower() not in WEEKDAYS:
+            raise ValueError(f"Ongeldige dag in config: {day.lower()}")
+    return sorted({d.lower() for d in days}, key=lambda d: WEEKDAYS[d])
+
+
 def upcoming_booking_dates(
-    day: str, time_start: str = "00:00", count: int = 3, now: datetime | None = None,
+    days: str | list[str], time_start: str = "00:00", count: int = 3, now: datetime | None = None,
 ) -> list[datetime]:
     """
-    Geef de eerstvolgende `count` datums op weekdag `day`.
+    Geef per weekdag in `days` de eerstvolgende `count` datums, chronologisch gesorteerd.
 
-    Vandaag telt alleen mee als het de doelweekdag is én `time_start` nog niet
+    Vandaag telt alleen mee als het een doelweekdag is én `time_start` nog niet
     verstreken is.
     """
-    target_weekday = WEEKDAYS.get(day.lower())
-    if target_weekday is None:
-        raise ValueError(f"Ongeldige dag in config: {day.lower()}")
-
     now = now or datetime.now()
-    days_ahead = (target_weekday - now.weekday()) % 7
-    if days_ahead == 0:
-        start = hhmm_to_minutes(time_start)
-        slot_time = now.replace(hour=start // 60, minute=start % 60, second=0, microsecond=0)
-        if now >= slot_time:
-            days_ahead = 7
+    start = hhmm_to_minutes(time_start)
+    slot_today = now.replace(hour=start // 60, minute=start % 60, second=0, microsecond=0)
 
-    first_date = now + timedelta(days=days_ahead)
-    return [first_date + timedelta(weeks=i) for i in range(count)]
+    dates = []
+    for day in booking_days({"days": days}):
+        days_ahead = (WEEKDAYS[day] - now.weekday()) % 7
+        if days_ahead == 0 and now >= slot_today:
+            days_ahead = 7
+        first_date = now + timedelta(days=days_ahead)
+        dates += [first_date + timedelta(weeks=i) for i in range(count)]
+    return sorted(dates)
 
 
 def without_skip_dates(dates: list[datetime], skip_dates: list[str]) -> list[datetime]:

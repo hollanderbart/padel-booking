@@ -15,6 +15,9 @@ with open("/app/.env", "w", encoding="utf-8") as f:
     if opts.get("playtomic_enabled") and opts.get("playtomic_password"):
         f.write(f"PLAYTOMIC_PASSWORD={opts['playtomic_password']}\n")
 
+# booking_days (lijst, sinds 2.5.0); oudere installaties hebben alleen booking_day
+booking_days = opts.get("booking_days") or [opts.get("booking_day", "thursday")]
+
 # Schrijf config.yaml
 config = {
     "location": {
@@ -24,7 +27,7 @@ config = {
         "longitude": opts.get("location_longitude"),
     },
     "booking": {
-        "day": opts["booking_day"],
+        "days": booking_days,
         "time_start": opts["booking_time_start"],
         "time_end": opts["booking_time_end"],
         "duration_minutes": int(opts["duration_minutes"]),
@@ -63,4 +66,4 @@ config = {
 with open("/app/config.yaml", "w", encoding="utf-8") as f:
     yaml.dump(config, f, allow_unicode=True)
 
-print(f"Config geladen: {opts['location_city']}, {opts['booking_day']} {opts['booking_time_start']}–{opts['booking_time_end']}")
+print(f"Config geladen: {opts['location_city']}, {'/'.join(booking_days)} {opts['booking_time_start']}–{opts['booking_time_end']}")

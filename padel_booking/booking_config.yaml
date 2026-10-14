@@ -3,7 +3,7 @@ location:
   radius_km: 20
 
 booking:
-  day: thursday
+  days: [thursday]
   time_start: "19:30"
   time_end: "21:00"
   duration_minutes: 90  # 60 of 90 minuten

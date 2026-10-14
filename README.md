@@ -8,7 +8,7 @@ Een **orchestrator** coördineert meerdere providers die parallel draaien als lo
 
 **Meet & Play provider** (browser automatisering via Playwright):
 1. Logt automatisch in via KNLTB ID SSO
-2. Zoekt beschikbare clubs in de regio op de komende weken (configureerbare dag)
+2. Zoekt beschikbare clubs in de regio op de komende weken (één of meer configureerbare weekdagen)
 3. Filtert op binnenbaan, avond, gewenste duur en speltype
 4. Boekt het eerste beschikbare tijdslot en navigeert naar de betalingspagina
 
@@ -18,6 +18,13 @@ Een **orchestrator** coördineert meerdere providers die parallel draaien als lo
 3. Haalt beschikbaarheid op en stuurt een notificatie met de club-URL (`https://app.playtomic.io/clubs/{id}`) zodra een passend slot gevonden is
 
 De boeking en betaling doe je zelf handmatig via de link in de notificatie. Er worden alleen notificaties gestuurd als er een beschikbaar slot gevonden wordt.
+
+**Alleen datums zonder boeking**: vóór elke volledige run haalt de addon je reserveringen op uit je
+Meet & Play account ([mijn-aankopen](https://meetandplay.nl/mijn-aankopen), tabblad "Aankomend") en,
+als die provider aan staat, uit Playtomic. Datums waarop je al een baan hebt worden overgeslagen, net
+als datums waarvoor de addon eerder al een slot vond (`booking_history.json`, ook als de betaling nog
+open staat). Een run probeert vervolgens **alle** overgebleven datums te boeken; per gevonden slot krijg
+je een notificatie met betaallink.
 
 ---
 
@@ -54,18 +61,18 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 | `location_radius_km` | Zoekradius in kilometers |
 | `location_latitude` | Breedtegraad voor Playtomic zoeken (bijv. `52.0738`) |
 | `location_longitude` | Lengtegraad voor Playtomic zoeken (bijv. `4.6567`) |
-| `booking_day` | Dag van de week om te boeken |
+| `booking_days` | Eén of meer weekdagen om te boeken, bijv. `thursday` of `tuesday` + `thursday` (standaard `thursday`). Vervangt `booking_day` uit versies vóór 2.5.0 — na de update staat `booking_days` op `thursday`; controleer dit als je een andere dag had |
 | `booking_time_start` | Vroegste starttijd (bijv. `19:30`) |
 | `booking_time_end` | Laatste starttijd (bijv. `21:00`) |
 | `duration_minutes` | Duur van de boeking: `60` of `90` minuten |
 | `court_type` | Baantype: `indoor` of `outdoor` |
 | `game_type` | Speltype: `double` (4 spelers) of `single` (2 spelers) |
-| `weeks_ahead` | Aantal weken vooruit zoeken (standaard `5`, zodat ook clubs met een venster van ~30 dagen op hun vrijgavemoment geboekt worden) |
+| `weeks_ahead` | Aantal weken vooruit zoeken, per gekozen weekdag (standaard `5`, zodat ook clubs met een venster van ~30 dagen op hun vrijgavemoment geboekt worden) |
 | `meetandplay_enabled` | Meet & Play provider in/uitschakelen (standaard `true`) |
 | `schedule_mode` | `smart` (standaard): addon draait continu en boekt op het vrijgavemoment per club. `nightly`: één run per start van de addon (oude gedrag) |
 | `playtomic_enabled` | Playtomic provider in/uitschakelen (standaard `false`). **Tijdelijk genegeerd** — Playtomic staat uit sinds v2.3.1, zie Troubleshooting |
-| `fetch_bookings_enabled` | Toekomstige boekingen ophalen en opslaan naar `/config/padel/future_bookings.json` (standaard `true`) |
-| `skip_booked_dates` | Sla datums over die al voorkomen in `future_bookings.json` voordat er gezocht wordt (standaard `true`) |
+| `fetch_bookings_enabled` | Vóór elke volledige run je reserveringen ophalen uit je account en opslaan naar `/config/padel/future_bookings.json` (standaard `true`) |
+| `skip_booked_dates` | Sla datums over waarop je al een reservering hebt (uit `future_bookings.json`) (standaard `true`). Zet dit én `fetch_bookings_enabled` aan om alleen op vrije datums te boeken |
 | `playtomic_email` | E-mailadres van je Playtomic account (vereist als Playtomic ingeschakeld) |
 | `playtomic_password` | Wachtwoord van je Playtomic account (vereist als Playtomic ingeschakeld) |
 
@@ -125,7 +132,12 @@ Of voeg dit toe aan `automations.yaml`:
 
 ## Toekomstige boekingen in Home Assistant
 
-Na elke run haalt het script live de toekomstige reserveringen op van beide accounts (Playtomic via de API, Meet & Play via de `mijn-reserveringen` pagina) en schrijft ze naar `/config/padel/future_bookings.json`. Je kunt deze weergeven in een Lovelace dashboard.
+Vóór elke volledige run (bij het starten van de addon en om 00:01) haalt de addon live je toekomstige reserveringen op (Meet & Play via [mijn-aankopen](https://meetandplay.nl/mijn-aankopen), Playtomic via de API als die provider aan staat) en schrijft ze naar `/config/padel/future_bookings.json`. De booker slaat die datums over (`skip_booked_dates`), en je kunt ze weergeven in een Lovelace dashboard.
+
+Lukt het ophalen niet (bijv. inloggen mislukt), dan blijft het bestaande bestand staan — anders zou de booker
+datums die al geboekt zijn opnieuw proberen. Let op: Meet & Play meldt dat nieuwe boekingen er pas na even
+zichtbaar zijn; datums waarvoor de addon zelf een slot vond, staan daarom ook in `booking_history.json` en
+worden ook overgeslagen.
 
 ### Stap 1 — Voeg de sensor toe aan `configuration.yaml`
 
@@ -172,8 +184,8 @@ content: >
     "club_address": "",
     "court_name": "Padelbaan 2",
     "time_range": "19:30 - 21:00",
-    "payment_url": "https://...",
-    "status": "confirmed"
+    "payment_url": "https://meetandplay.nl/mijn-aankopen/order/...",
+    "status": "betaald"
   },
   {
     "booked_date": "2026-04-17",
@@ -251,13 +263,22 @@ Het bestand bevat maximaal 20 entries. De nieuwste boeking staat bovenaan.
 
 ## Boeking resetten (opnieuw zoeken forceren)
 
-Na een gevonden slot slaat de addon de boekingsdatum op in `/config/padel/.booking_state.json`. Volgende runs worden overgeslagen zodra de verste doeldatum (het aantal weken vooruit in `weeks_ahead`) al geboekt is. Als er nog latere Thursdays in het zoekvenster zitten die nog niet geboekt zijn, gaat de addon gewoon door met zoeken. Met een knop op het dashboard kun je het state-bestand wissen om het zoeken volledig te resetten.
+Na een gevonden slot zet de addon de datum in `/config/padel/booking_history.json`. Toekomstige datums uit
+die geschiedenis worden niet opnieuw gezocht — ook niet als je de betaling niet afgerond hebt. Wil je dat
+de addon die datums tóch opnieuw probeert, verwijder dan de toekomstige datums uit de geschiedenis (de
+datums in het verleden blijven staan voor het dashboard). Reserveringen in je account worden altijd
+overgeslagen.
 
 ### Stap 1 — Voeg de shell_command toe aan `configuration.yaml`
 
 ```yaml
 shell_command:
-  padel_reset_booking: "rm -f /config/padel/.booking_state.json"
+  padel_reset_booking: >-
+    python3 -c "import json, datetime;
+    p = '/config/padel/booking_history.json';
+    t = datetime.date.today().isoformat();
+    h = json.load(open(p));
+    json.dump([e for e in h if e.get('booked_date', '') < t], open(p, 'w'), indent=2)"
 ```
 
 Herstart daarna Home Assistant.
@@ -309,12 +330,14 @@ en in de samenvatting van elke workflow-run.
 ### Boeken op het vrijgavemoment (`schedule_mode: smart`)
 
 `scheduler.py` haalt elke 6 uur `club_schedule.json` op van de `booking-research` branch (met een
-cache in `/config/padel/club_schedule.json`) en plant voor elke doeldag binnen `weeks_ahead`:
+cache in `/config/padel/club_schedule.json`) en plant voor elke doeldag (alle `booking_days`) binnen `weeks_ahead`:
 
 - **rollende clubs**: een run N dagen vóór de doeldag op elke starttijd binnen het tijdvenster
   (bijv. 19:30, 20:00 en 20:30)
 - **dagelijkse clubs**: een run N dagen vóór de doeldag op het vrijgave-uur
-- **altijd**: een volledige run om 00:01 (alle clubs, alle datums) als vangnet, en bij het starten van de addon
+- **altijd**: een volledige run om 00:01 (alle clubs, alle open datums) als vangnet, en bij het starten van de addon.
+  Vóór een volledige run worden eerst je reserveringen opgehaald; gerichte runs doen dat niet, zodat ze
+  precies op het vrijgavemoment starten (ze gebruiken de reserveringen van de laatste volledige run)
 
 Een gerichte run gaat direct naar de clubpagina (geen zoekpagina) en wordt na 1 en 5 minuten herhaald
 als er nog niets vrij was. Clubs met strategie "onvoldoende data" of "blok" worden alleen door de
@@ -364,7 +387,7 @@ python orchestrator.py --dry-run
 python orchestrator.py --dry-run --target '{"dates": ["2026-10-22"], "clubs": [{"name": "Sportcentrum midden Boskoop", "url": "https://meetandplay.nl/club/88093", "address": "Sportlaan 1, Boskoop"}]}'
 
 # Individuele provider testen
-echo '{"booking_request":{"location":{"city":"Boskoop","radius_km":20},"day":"thursday","time_start":"19:30","time_end":"21:00","duration_minutes":90,"court_type":"indoor","game_type":"double","weeks_ahead":4},"credentials":{"email":"...","password":"..."},"provider_config":{"cookies_file":".meetandplay_cookies.json"},"dry_run":true}' | python -m providers.meetandplay.provider
+echo '{"booking_request":{"location":{"city":"Boskoop","radius_km":20},"days":["thursday"],"time_start":"19:30","time_end":"21:00","duration_minutes":90,"court_type":"indoor","game_type":"double","weeks_ahead":4},"credentials":{"email":"...","password":"..."},"provider_config":{"cookies_file":".meetandplay_cookies.json"},"dry_run":true}' | python -m providers.meetandplay.provider
 ```
 
 ### Unit tests uitvoeren
@@ -378,7 +401,7 @@ pytest tests/ test_integration.py -v
 ```
 
 De `tests/` map bevat 262 tests voor alle modules:
-- `test_orchestrator.py` — deduplicatie, state, provider subprocess, first-wins logica, provider-selectie
+- `test_orchestrator.py` — open datums, al geboekte datums, alle open datums boeken, provider subprocess, first-wins logica, provider-selectie
 - `test_orchestrator_files.py` — boekingsgeschiedenis en `last_run.json`
 - `test_base.py` — ProviderResult JSON contract, gedeelde datum/tijd-helpers, provider entry point
 - `test_notify.py` — HA push, macOS, console notificaties
@@ -530,7 +553,7 @@ padel-booking/
 │   ├── requirements.txt
 │   └── booking_config.yaml          # standaard booking configuratie (fallback)
 ├── orchestrator.py                  # hoofdscript — coördineert providers
-├── fetch_bookings.py                # haalt toekomstige boekingen op (future_bookings.json)
+├── fetch_bookings.py                # haalt je reserveringen op uit je account (future_bookings.json)
 ├── notify.py                        # notificaties (HA push + macOS + console)
 ├── providers/
 │   ├── base.py                      # ProviderResult contract + gedeelde datum/tijd-helpers

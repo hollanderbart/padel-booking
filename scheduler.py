@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from orchestrator import load_config, setup_logging
-from providers.base import hhmm_to_minutes, upcoming_booking_dates
+from providers.base import booking_days, hhmm_to_minutes, upcoming_booking_dates
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,6 @@ REQUEST_TIMEOUT = 30
 RUN_TIMEOUT = 15 * 60                      # seconden per booking-run
 
 NIGHTLY_RUN = time(0, 1)                   # volledige run, vangnet voor clubs zonder bekende strategie
-FETCH_BOOKINGS_AT = time(3, 30)            # dagelijks future_bookings.json verversen
 SCHEDULE_REFRESH = timedelta(hours=6)
 RELEASE_DELAY = timedelta(seconds=5)       # kleine marge na het vrijgavemoment
 RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=5))
@@ -107,7 +106,7 @@ def plan_runs(schedule: dict, booking_cfg: dict, since: datetime, until: datetim
     def targets_at(moment: datetime, extra_weeks: int = 0) -> list[date]:
         return [
             d.date() for d in upcoming_booking_dates(
-                booking_cfg["day"], booking_cfg["time_start"],
+                booking_days(booking_cfg), booking_cfg["time_start"],
                 booking_cfg.get("weeks_ahead", 4) + extra_weeks, now=moment,
             )
         ]
@@ -211,6 +210,10 @@ def _sleep_until(moment: datetime) -> None:
 
 def execute(run: PlannedRun, config: dict, debug: bool) -> None:
     """Voer een run uit; een gerichte run wordt herhaald als er (nog) niets vrij was."""
+    if not run.dates:
+        # Volledige run: eerst de reserveringen uit je account ophalen, zodat geboekte datums
+        # overgeslagen worden. Gerichte runs niet — die moeten direct op het vrijgavemoment starten.
+        run_fetch_bookings(config)
     code = run_booking(run, debug)
     if run.dates:
         for delay in RETRY_DELAYS:
@@ -218,9 +221,6 @@ def execute(run: PlannedRun, config: dict, debug: bool) -> None:
                 break
             _sleep_until(run.at + delay)
             code = run_booking(run, debug)
-    if code == 0:
-        # Werk future_bookings.json bij, zodat volgende runs deze datum overslaan
-        run_fetch_bookings(config)
 
 
 def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug: bool) -> None:
@@ -231,7 +231,6 @@ def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug
     schedule = load_schedule(url, cache_file, local_file)
     describe_schedule(schedule)
     loaded_at = datetime.now(TZ)
-    last_fetch_day = None
     done: set[datetime] = set()
 
     # Zelfde gedrag als vroeger bij het starten van de addon: direct één volledige run
@@ -243,9 +242,6 @@ def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug
             schedule = load_schedule(url, cache_file, local_file)
             describe_schedule(schedule)
             loaded_at = now
-        if now.time() >= FETCH_BOOKINGS_AT and last_fetch_day != now.date():
-            run_fetch_bookings(config)
-            last_fetch_day = now.date()
 
         due = [r for r in plan_runs(schedule, booking_cfg, now - DUE_GRACE, now + timedelta(days=1)) if r.at not in done]
         if not due:
