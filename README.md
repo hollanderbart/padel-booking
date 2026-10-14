@@ -281,7 +281,8 @@ hun banen om middernacht vrijgeven. Clubs hanteren verschillende **release-strat
 
 De workflow [`.github/workflows/booking-research.yml`](.github/workflows/booking-research.yml)
 meet zes keer per dag, voor elke Meet & Play club binnen de straal uit `config.yaml`, wat de
-verste dag met een boekbaar padel-slot is en tot welk tijdstip die dag open staat.
+verste dag met een boekbaar padel-slot is en welke starttijden die dag open staan (uit de
+"Tijdstip"-kiezer op de clubpagina).
 `research/booking_windows.py` leidt daaruit per club de strategie, het venster (N dagen) en
 het vrijgave-uur af. Het resultaat staat op de branch
 [`booking-research`](https://github.com/hollanderbart/padel-booking/blob/booking-research/BOOKING_WINDOWS.md) (`BOOKING_WINDOWS.md`)
