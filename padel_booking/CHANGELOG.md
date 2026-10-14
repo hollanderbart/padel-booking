@@ -1,3 +1,8 @@
+## 2.6.0
+
+- Gewijzigd: alleen reserveringen in je account (`future_bookings.json`) tellen als geboekt. `booking_history.json` is weer puur een logboek — een gevonden maar niet betaald slot wordt bij een volgende run opnieuw gezocht. De reset-shell_command is daardoor niet meer nodig
+- Fix (Meet & Play): soms bleef de addon na "Betaling starten" op de clubpagina staan en stuurde die als betaallink — onbruikbaar, want de winkelwagen zit alleen in de sessie van de addon. Het voorwaarden-vinkje wordt nu met een echte klik gezet, de betaalknop wordt zo nodig twee keer geprobeerd en een betaalpagina in een nieuw tabblad wordt ook herkend. Lukt het niet, dan telt het slot niet als gevonden en zoekt de addon verder; screenshot + HTML staan in `/config/padel/debug_payment_failed.*`
+
 ## 2.5.1
 
 - Fix (Meet & Play): enkelspelbanen werden geboekt bij `game_type: double` als "single" alleen in de baannaam stond (bijv. "Padelhal | Baan 5 (SINGLE | max. 2 spelers)"). De baannaam wordt nu ook gecontroleerd

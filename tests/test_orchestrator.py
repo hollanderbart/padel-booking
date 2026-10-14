@@ -4,7 +4,7 @@ Unit tests voor orchestrator.py — geen browser of credentials nodig.
 
 import asyncio
 import json
-from datetime import date, datetime
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -16,7 +16,6 @@ from orchestrator import (
     build_provider_request,
     enabled_providers,
     load_config,
-    load_handled_dates,
     main_async,
     open_dates,
     run_all_providers,
@@ -92,28 +91,6 @@ class TestLoadConfig:
 # ---------------------------------------------------------------------------
 # Al geboekte datums / open datums
 # ---------------------------------------------------------------------------
-
-class TestLoadHandledDates:
-    TODAY = date(2026, 10, 14)
-
-    def test_geen_bestand_geeft_lege_set(self, tmp_path):
-        assert load_handled_dates(tmp_path / "geen.json", self.TODAY) == set()
-
-    def test_alleen_toekomstige_datums(self, tmp_path):
-        f = tmp_path / "history.json"
-        f.write_text(json.dumps([
-            {"booked_date": "2026-10-22"},
-            {"booked_date": "2026-10-14"},
-            {"booked_date": "2026-10-08"},
-            {"provider": "meetandplay"},
-        ]))
-        assert load_handled_dates(f, self.TODAY) == {"2026-10-22", "2026-10-14"}
-
-    def test_corrupt_bestand_geeft_lege_set(self, tmp_path):
-        f = tmp_path / "history.json"
-        f.write_text("GEEN_JSON{{{")
-        assert load_handled_dates(f, self.TODAY) == set()
-
 
 class TestOpenDates:
     NOW = datetime(2026, 10, 14, 12, 0)  # woensdag
@@ -439,3 +416,12 @@ class TestMainAsync:
         monkeypatch.setattr(orchestrator, "run_all_providers", run_all)
         assert await main_async(debug=False, dry_run=False) == 0
         run_all.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_boekingsgeschiedenis_telt_niet_als_geboekt(self, setup, monkeypatch):
+        # Een eerder gevonden (onbetaald) slot staat niet in het account → datum blijft open
+        (setup / "history.json").write_text(json.dumps([{"booked_date": "2026-10-15"}]))
+        seen = []
+        monkeypatch.setattr(orchestrator, "run_all_providers", self._provider_that_books_first_open_date(seen))
+        assert await main_async(debug=False, dry_run=False) == 0
+        assert seen == [[], ["2026-10-15"]]

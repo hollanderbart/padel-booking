@@ -7,6 +7,7 @@ import contextlib
 import logging
 import re
 from datetime import datetime
+from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Locator, Page, sync_playwright
 
@@ -17,7 +18,7 @@ from providers.base import (
     upcoming_booking_dates,
     without_skip_dates,
 )
-from providers.meetandplay.session import SessionManager, accept_cookie_banner
+from providers.meetandplay.session import SessionManager, accept_cookie_banner, save_debug_page
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,13 @@ START_TIME_SELECTOR = 'input[name="time"]'
 # Enkelspel staat soms alleen in de baannaam, bijv. "Padelhal | Baan 5 (SINGLE | max. 2 spelers)"
 SINGLES_MARKERS = ("enkelspel", "single", "max. 2 spelers", "max 2 spelers")
 CHECKOUT_URL_KEYWORDS = ["reserveren", "winkelwagen", "payment", "checkout", "betaling", "betalen", "order", "bestelling"]
+PAY_BUTTON_SELECTORS = [
+    'button:has-text("Betaling starten")',
+    'button:has-text("Nu betalen")',
+    'button:has-text("Betalen")',
+    'a:has-text("Betalen")',
+]
+PAY_ATTEMPTS = 2
 LIVEWIRE_DATE_RE = re.compile(r"window\.Livewire\.find\('([^']+)'\)\.set\('date'")
 SLOT_LABEL_JS = """el => {
     let sibling = el.closest('.timeslots');
@@ -36,6 +44,12 @@ SLOT_LABEL_JS = """el => {
     let prev = sibling.previousElementSibling;
     return prev ? prev.innerText : '';
 }"""
+
+
+def _is_payment_url(url: str) -> bool:
+    """Betaalpagina = alles buiten meetandplay.nl zelf (iDEAL, de boekingssite van de club, …)."""
+    host = urlparse(url).netloc.lower()
+    return bool(host) and host not in ("meetandplay.nl", "www.meetandplay.nl")
 
 
 def _first_present(page: Page, selectors: list[str], visible: bool = False) -> Locator | None:
@@ -451,45 +465,64 @@ class MeetAndPlayBooker:
         on_cart = "Winkelwagen" in page_html or any(kw in current_url.lower() for kw in CHECKOUT_URL_KEYWORDS)
         if not on_cart:
             logger.warning("Winkelwagen/betalingspagina niet bereikt. Huidige URL: %s", current_url)
-            with contextlib.suppress(Exception):
-                page.screenshot(path="debug_after_checkout.png", full_page=True)
+            save_debug_page(page, "debug_after_checkout")
         return on_cart
 
     @staticmethod
-    def _fetch_payment_url(page: Page) -> str:
-        """Accepteer de voorwaarden en klik door naar de betaalprovider; geef de resulterende URL terug."""
-        logger.info("Winkelwagen bereikt — voorwaarden accepteren en betaallink ophalen...")
-        current_url = page.url
-
+    def _accept_terms(page: Page) -> None:
         tos_checkbox = page.locator("input#tos")
         try:
             tos_checkbox.wait_for(state="visible", timeout=10000)
         except Exception:  # noqa: BLE001
             logger.warning("TOS checkbox niet gevonden binnen 10s")
-        if tos_checkbox.count() > 0 and not tos_checkbox.is_checked():
+            return
+        if tos_checkbox.is_checked():
+            return
+        # Echte klik (met events) zodat Livewire het vinkje oppikt; JS-klik als terugval
+        try:
+            tos_checkbox.check(timeout=5000)
+        except Exception:  # noqa: BLE001
             page.evaluate("document.querySelector('input#tos').click()")
-            page.wait_for_timeout(1000)
-            logger.info("Voorwaarden geaccepteerd")
+        page.wait_for_timeout(1500)
+        logger.info("Voorwaarden geaccepteerd (aangevinkt: %s)", tos_checkbox.is_checked())
 
-        pay_btn = page.locator('button:has-text("Betaling starten")')
-        if pay_btn.count() == 0:
-            pay_btn = _first_present(
-                page,
-                ['button:has-text("Betalen")', 'button:has-text("Nu betalen")', 'a:has-text("Betalen")'],
-                visible=True,
-            ) or pay_btn
-
-        if pay_btn.count() == 0 or not pay_btn.first.is_visible():
-            logger.warning("Betaalknop niet gevonden — gebruik checkout-URL als fallback")
-            return current_url
-
-        logger.info("Betaalknop gevonden, klikken om betaalprovider-URL op te halen...")
-        pay_btn.first.click()
+    @staticmethod
+    def _payment_page_url(page: Page) -> str:
+        """URL van de betaalpagina — in dit tabblad of in een nieuw geopend tabblad — of ""."""
+        if _is_payment_url(page.url):
+            return page.url
         with contextlib.suppress(Exception):
-            page.wait_for_url(lambda url: url != current_url, timeout=20000)
-        page.wait_for_timeout(2000)
-        logger.info("Betaalprovider-URL: %s", page.url)
-        return page.url
+            for other in page.context.pages:
+                if other is not page and _is_payment_url(other.url):
+                    return other.url
+        return ""
+
+    def _fetch_payment_url(self, page: Page) -> str:
+        """
+        Accepteer de voorwaarden en klik door naar de betaalprovider. Geeft de betaal-URL terug,
+        of "" als de betaalpagina niet bereikt is (de winkelwagen zit dan alleen in de sessie van de bot).
+        """
+        logger.info("Winkelwagen bereikt — voorwaarden accepteren en betaallink ophalen...")
+        self._accept_terms(page)
+
+        for attempt in range(1, PAY_ATTEMPTS + 1):
+            pay_btn = _first_present(page, PAY_BUTTON_SELECTORS, visible=True)
+            if pay_btn is None:
+                logger.warning("Betaalknop niet gevonden (poging %d)", attempt)
+                break
+            logger.info("'%s' klikken (poging %d)...", pay_btn.first.inner_text().strip(), attempt)
+            pay_btn.first.click()
+            with contextlib.suppress(Exception):
+                page.wait_for_url(_is_payment_url, timeout=30000)
+            page.wait_for_timeout(2000)
+            if url := self._payment_page_url(page):
+                logger.info("Betaalprovider-URL: %s", url)
+                return url
+            logger.warning("Betaalpagina niet bereikt na klik (URL: %s)", page.url)
+            self._accept_terms(page)
+
+        save_debug_page(page, "debug_payment_failed")
+        return ""
 
     def _book_timeslot(self, page: Page, slot_info: dict) -> bool:
         slot_id = slot_info["slot_id"]
@@ -500,6 +533,9 @@ class MeetAndPlayBooker:
         if not (self._add_to_cart(page, slot_id) and self._checkout(page, slot_id)):
             return False
         slot_info["payment_url"] = self._fetch_payment_url(page)
+        if not slot_info["payment_url"]:
+            logger.warning("Geen betaallink — slot telt niet als geboekt")
+            return False
         return True
 
     # ------------------------------------------------------------------
