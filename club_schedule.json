@@ -1,0 +1,117 @@
+{
+  "generated_at": "2026-10-14T11:41+02:00",
+  "clubs": [
+    {
+      "club_url": "https://meetandplay.nl/club/70359",
+      "club_name": "A.T.V. Berkenrode",
+      "club_address": "Het Hoge Land 1, 2652 EA BERKEL EN RODENRIJS",
+      "strategy": "rollend",
+      "window_days": 7,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/88191",
+      "club_name": "Hal 0172",
+      "club_address": "Nieuwveenseweg 39A, 2421 LB Nieuwkoop",
+      "strategy": "rollend",
+      "window_days": 14,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/31559",
+      "club_name": "Tennis & Padel de Munnik",
+      "club_address": "Hoogmadeseweg 41c, 2351 CN Leiderdorp",
+      "strategy": "rollend",
+      "window_days": 1,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/28541",
+      "club_name": "Tennis en Padel Meerzicht",
+      "club_address": "Zalkerbos 320, 2716 KS Zoetermeer",
+      "strategy": "rollend",
+      "window_days": 30,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/77405",
+      "club_name": "Lake Seven",
+      "club_address": "Strandweg 23 , 2761 DM Zevenhuizen",
+      "strategy": "dagelijks",
+      "window_days": 8,
+      "release_hours": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/88115",
+      "club_name": "My Padel Club Krimpen",
+      "club_address": "Krimpenerbosweg 4 , 2923 LA Krimpen aan den IJssel",
+      "strategy": "dagelijks",
+      "window_days": 13,
+      "release_hours": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/88093",
+      "club_name": "Sportcentrum midden Boskoop",
+      "club_address": "Sportlaan 1 , 2771RW Boskoop",
+      "strategy": "dagelijks",
+      "window_days": 8,
+      "release_hours": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/88018",
+      "club_name": "TERWEGEN INDOOR",
+      "club_address": "Jagtlustkade 12 , 2171 AG Sassenheim",
+      "strategy": "dagelijks",
+      "window_days": 29,
+      "release_hours": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    }
+  ]
+}
