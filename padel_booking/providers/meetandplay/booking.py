@@ -37,6 +37,8 @@ PAY_BUTTON_SELECTORS = [
     'a:has-text("Betalen")',
 ]
 PAY_ATTEMPTS = 2
+# Waarden van de afstand-dropdown op /zoeken (400 = "Toon alles")
+DISTANCE_OPTIONS_KM = (5, 10, 20, 50, 100, 150, 200, 400)
 LIVEWIRE_DATE_RE = re.compile(r"window\.Livewire\.find\('([^']+)'\)\.set\('date'")
 SLOT_LABEL_JS = """el => {
     let sibling = el.closest('.timeslots');
@@ -50,6 +52,18 @@ def _is_payment_url(url: str) -> bool:
     """Betaalpagina = alles buiten meetandplay.nl zelf (iDEAL, de boekingssite van de club, …)."""
     host = urlparse(url).netloc.lower()
     return bool(host) and host not in ("meetandplay.nl", "www.meetandplay.nl")
+
+
+def _distance_option(radius_km) -> str:
+    """Grootste afstand uit de dropdown die niet verder zoekt dan `radius_km` (minimaal 5 km)."""
+    radius = int(radius_km)
+    option = max((d for d in DISTANCE_OPTIONS_KM if d <= radius), default=DISTANCE_OPTIONS_KM[0])
+    if option != radius:
+        logger.warning(
+            "Straal %d km kan niet op Meet & Play (kies uit %s) — %d km gebruikt",
+            radius, ", ".join(map(str, DISTANCE_OPTIONS_KM)), option,
+        )
+    return str(option)
 
 
 def _first_present(page: Page, selectors: list[str], visible: bool = False) -> Locator | None:
@@ -172,7 +186,7 @@ class MeetAndPlayBooker:
 
     def _search_clubs(self, page: Page, filter_on_date: bool = True) -> list[dict]:
         city = self._booking["location"]["city"]
-        radius = str(self._booking["location"]["radius_km"])
+        radius = _distance_option(self._booking["location"]["radius_km"])
         date_str = self._get_upcoming_booking_dates(count=1)[0].strftime("%d-%m-%Y")
 
         logger.info("Zoeken naar clubs in %s (straal %s km) op %s...", city, radius, date_str)

@@ -1,3 +1,7 @@
+## 2.6.1
+
+- Fix (Meet & Play): een `location_radius_km` die niet in de afstand-dropdown staat (bijv. 15) liet elke run vastlopen op een timeout. De straal wordt nu afgerond naar de grootste toegestane waarde die niet verder zoekt (5, 10, 20, 50, 100, 150, 200 km), met een waarschuwing in de log
+
 ## 2.6.0
 
 - Gewijzigd: alleen reserveringen in je account (`future_bookings.json`) tellen als geboekt. `booking_history.json` is weer puur een logboek — een gevonden maar niet betaald slot wordt bij een volgende run opnieuw gezocht. De reset-shell_command is daardoor niet meer nodig
