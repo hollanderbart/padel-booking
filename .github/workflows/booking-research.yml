@@ -1,0 +1,77 @@
+name: Booking research
+
+# Meet per club wanneer nieuwe padelbanen vrijkomen (zie research/booking_windows.py).
+# Observaties en het rapport (BOOKING_WINDOWS.md) staan op de branch `booking-research`.
+
+on:
+  schedule:
+    # Tijden in UTC ≈ 00:15, 07:15, 11:15, 15:15, 19:15 en 22:15 Nederlandse zomertijd
+    # (in de winter een uur eerder). Overdag onderscheidt "rollend" van "hele dag";
+    # 's nachts en 's avonds laat leggen het vrijgave-uur vast.
+    - cron: "15 5,9,13,17,20,22 * * *"
+  workflow_dispatch:
+    inputs:
+      max_clubs:
+        description: "Maximaal aantal clubs (leeg = alle clubs binnen de straal uit config.yaml)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: booking-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    name: Release-strategieën meten
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TZ: Europe/Amsterdam
+      DATA_BRANCH: booking-research
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installeer dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Data-branch ophalen
+        run: |
+          if git ls-remote --exit-code --heads origin "$DATA_BRANCH" > /dev/null; then
+            git fetch --depth=1 origin "$DATA_BRANCH:refs/remotes/origin/$DATA_BRANCH"
+            git worktree add -B "$DATA_BRANCH" research-data "origin/$DATA_BRANCH"
+          else
+            git worktree add --orphan -b "$DATA_BRANCH" research-data
+          fi
+
+      - name: Clubs meten
+        env:
+          MAX_CLUBS: ${{ inputs.max_clubs }}
+        run: python -m research.booking_windows --data-dir research-data ${MAX_CLUBS:+--max-clubs "$MAX_CLUBS"}
+
+      - name: Rapport in samenvatting
+        if: always()
+        run: cat research-data/BOOKING_WINDOWS.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+      - name: Observaties committen
+        working-directory: research-data
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Geen wijzigingen"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Research: observaties $(date '+%Y-%m-%d %H:%M')"
+          git push origin "$DATA_BRANCH"

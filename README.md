@@ -266,6 +266,33 @@ Na het tikken op de knop zal de addon bij de eerstvolgende run opnieuw zoeken na
 
 ---
 
+## Wanneer komen banen vrij? (booking research)
+
+De addon draait standaard één keer per nacht (00:01). Dat werkt alleen goed voor clubs die
+hun banen om middernacht vrijgeven. Clubs hanteren verschillende **release-strategieën**:
+
+| Strategie | Hoe het werkt | Beste moment om te boeken |
+|---|---|---|
+| **Rollend (exact tijdstip)** | Slot T komt vrij op T − N dagen, bijv. de baan van 20:00 komt 7 dagen eerder om 20:00 vrij | Precies N dagen vóór het slot, op de starttijd |
+| **Dagelijks vast uur** | Elke dag om uur H (vaak 00:00 of 07:00) komt de dag vandaag + N in zijn geheel vrij | Dagelijks om H |
+| **Blok (wekelijks/periodiek)** | Een hele periode komt in één keer vrij, bijv. elke maandag de volgende week | Op het wekelijkse vrijgavemoment |
+| **Leden vs. gasten** | Leden mogen verder vooruit boeken dan gasten (Meet & Play = gast) | Volgens het gastenvenster |
+| **Annuleringen** | Slots komen terug vlak vóór de gratis-annuleringsgrens (bijv. 24 uur vooraf) of na een verlopen winkelwagen | Pollen rond die grens |
+
+De workflow [`.github/workflows/booking-research.yml`](.github/workflows/booking-research.yml)
+meet zes keer per dag, voor elke Meet & Play club binnen de straal uit `config.yaml`, wat de
+verste dag met een boekbaar padel-slot is en tot welk tijdstip die dag open staat.
+`research/booking_windows.py` leidt daaruit per club de strategie, het venster (N dagen) en
+het vrijgave-uur af. Het resultaat staat op de branch
+[`booking-research`](https://github.com/hollanderbart/padel-booking/blob/booking-research/BOOKING_WINDOWS.md) (`BOOKING_WINDOWS.md`)
+en in de samenvatting van elke workflow-run.
+
+- Meting gebeurt als niet-ingelogde bezoeker (het gastenvenster), niet als clublid.
+- Een volgeboekte dag lijkt op een dag die nog niet open is; daarom telt de meerderheid
+  over meerdere metingen. Reken op een paar dagen data voor een betrouwbaar beeld.
+- Handmatig starten: **Actions → Booking research → Run workflow**.
+- Lokaal: `python -m research.booking_windows --data-dir research-data --max-clubs 3`.
+
 ## Push notificaties
 
 Bij een beschikbaar slot ontvang je een push notificatie ("Padelbaan beschikbaar!") met:
@@ -311,7 +338,7 @@ pytest tests/ -v
 pytest tests/ test_integration.py -v
 ```
 
-De `tests/` map bevat 215 tests voor alle modules:
+De `tests/` map bevat 234 tests voor alle modules:
 - `test_orchestrator.py` — deduplicatie, state, provider subprocess, first-wins logica, provider-selectie
 - `test_orchestrator_files.py` — boekingsgeschiedenis en `last_run.json`
 - `test_base.py` — ProviderResult JSON contract, gedeelde datum/tijd-helpers, provider entry point
@@ -321,6 +348,7 @@ De `tests/` map bevat 215 tests voor alle modules:
 - `test_meetandplay_booking.py` — slot filters, login, checkout-flow, Playwright mocks
 - `test_session.py` — cookie/sessie beheer, automatisch inloggen
 - `test_fetch_bookings.py` — datum-parsing en omzetten van toekomstige boekingen
+- `test_research.py` — herkennen van release-strategieën met gesimuleerde clubs
 
 ### Lint
 
@@ -365,6 +393,9 @@ Bij de upgrade van v1 (knltb_padel_booking) naar v2 (padel_booking) moet je:
 
 - Controleer `playtomic_email` en `playtomic_password`
 - Als je Playtomic account via Google/Apple SSO is aangemaakt, stel dan eerst een wachtwoord in via "Wachtwoord vergeten" op playtomic.io
+- Bekend probleem (oktober 2026): de API-host `api.playtomic.io` heeft geen DNS-record meer. Fouten als
+  `Could not resolve host` / `NameResolutionError` in de log komen daardoor; de Playtomic provider werkt
+  tot de nieuwe API-host is ingesteld in `providers/playtomic/client.py` niet
 
 ### Script vindt geen banen terwijl er wel slots beschikbaar zijn
 
@@ -421,6 +452,7 @@ padel-booking/
 │       ├── provider.py              # entry point subprocess
 │       ├── client.py                # REST API client
 │       └── booking.py               # boekingslogica
+├── research/booking_windows.py      # meet release-strategieën per club
 ├── tests/                           # unit tests (pytest)
 ├── test_integration.py              # integratietest Meet & Play (vereist credentials)
 ├── ruff.toml                        # lint-configuratie

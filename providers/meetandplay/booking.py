@@ -124,7 +124,7 @@ class MeetAndPlayBooker:
     # Zoeken naar clubs
     # ------------------------------------------------------------------
 
-    def _search_clubs(self, page: Page) -> list[dict]:
+    def _search_clubs(self, page: Page, filter_on_date: bool = True) -> list[dict]:
         city = self._booking["location"]["city"]
         radius = str(self._booking["location"]["radius_km"])
         date_str = self._get_upcoming_booking_dates(count=1)[0].strftime("%d-%m-%Y")
@@ -148,7 +148,7 @@ class MeetAndPlayBooker:
             page.locator("select#indoor").select_option("INDOOR")
             page.wait_for_timeout(1500)
 
-        if not self._set_livewire_date(page, date_str):
+        if filter_on_date and not self._set_livewire_date(page, date_str):
             logger.warning("Livewire datum-component niet gevonden op zoekpagina")
 
         cards = page.locator(".c-club-card.mp-club-card")
