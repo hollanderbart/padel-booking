@@ -1,3 +1,8 @@
+## 2.3.2
+
+- Fix (booking research): de Meet & Play clubpagina toont per keer slots van één starttijd, waardoor "laatste slot op de horizon-dag" niets zei over rollend vs. hele-dag release. Zulke observaties tellen niet meer mee voor die conclusie (het venster in dagen blijft wel geldig)
+- Booking research: optie `snapshot` bij handmatig starten bewaart pagina-HTML per club als artifact (diagnose)
+
 ## 2.3.1
 
 - Playtomic provider tijdelijk uitgeschakeld (ook als `playtomic_enabled: true` is ingesteld): de API-host `api.playtomic.io` resolveert niet meer. Geldt voor zowel boeken als het ophalen van toekomstige boekingen; de log toont een waarschuwing

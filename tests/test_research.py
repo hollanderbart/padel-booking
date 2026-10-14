@@ -99,14 +99,21 @@ class TestSummarizeScan:
 
 
 class TestClassifyObservation:
-    def _obs(self, observed, last_slot):
-        return {"observed_at": observed, "last_slot": last_slot}
+    def _obs(self, observed, last_slot, distinct=5):
+        return {"observed_at": observed, "last_slot": last_slot, "distinct_start_times": distinct}
 
     def test_laatste_slot_vlak_voor_nu_is_cutoff(self):
         assert classify_observation(self._obs("2026-04-09T15:15+02:00", "15:00")) == "cutoff"
 
     def test_slots_tot_de_avond_is_full_day(self):
         assert classify_observation(self._obs("2026-04-09T15:15+02:00", "22:00")) == "full_day"
+
+    def test_een_enkele_starttijd_is_niet_informatief(self):
+        """De pagina toonde alleen slots van één starttijd — zegt niets over het verloop over de dag."""
+        assert classify_observation(self._obs("2026-04-09T10:55+02:00", "09:00", distinct=1)) is None
+
+    def test_oude_observatie_zonder_veld_is_niet_informatief(self):
+        assert classify_observation({"observed_at": "2026-04-09T15:15+02:00", "last_slot": "15:00"}) is None
 
     def test_nacht_observatie_niet_informatief(self):
         assert classify_observation(self._obs("2026-04-09T00:15+02:00", "22:00")) is None

@@ -290,7 +290,8 @@ en in de samenvatting van elke workflow-run.
 - Meting gebeurt als niet-ingelogde bezoeker (het gastenvenster), niet als clublid.
 - Een volgeboekte dag lijkt op een dag die nog niet open is; daarom telt de meerderheid
   over meerdere metingen. Reken op een paar dagen data voor een betrouwbaar beeld.
-- Handmatig starten: **Actions → Booking research → Run workflow**.
+- Handmatig starten: **Actions → Booking research → Run workflow**. Met `snapshot` aangevinkt
+  wordt per club de pagina-HTML als artifact bewaard (handig als Meet & Play de pagina wijzigt).
 - Lokaal: `python -m research.booking_windows --data-dir research-data --max-clubs 3`.
 
 ## Push notificaties

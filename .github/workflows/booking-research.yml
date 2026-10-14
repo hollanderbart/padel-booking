@@ -15,6 +15,10 @@ on:
         description: "Maximaal aantal clubs (leeg = alle clubs binnen de straal uit config.yaml)"
         required: false
         default: ""
+      snapshot:
+        description: "Bewaar pagina-HTML per club als artifact (diagnose)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -57,7 +61,19 @@ jobs:
       - name: Clubs meten
         env:
           MAX_CLUBS: ${{ inputs.max_clubs }}
-        run: python -m research.booking_windows --data-dir research-data ${MAX_CLUBS:+--max-clubs "$MAX_CLUBS"}
+          SNAPSHOT: ${{ inputs.snapshot }}
+        run: |
+          python -m research.booking_windows --data-dir research-data \
+            ${MAX_CLUBS:+--max-clubs "$MAX_CLUBS"} \
+            $([ "$SNAPSHOT" = "true" ] && echo --snapshot-dir research-snapshots)
+
+      - name: Snapshots uploaden
+        if: ${{ always() && inputs.snapshot }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-snapshots
+          path: research-snapshots/
+          retention-days: 7
 
       - name: Rapport in samenvatting
         if: always()
