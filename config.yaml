@@ -12,7 +12,7 @@ booking:
   duration_minutes: 90  # 60 of 90 minuten
   court_type: indoor    # indoor of outdoor
   game_type: double     # double = 4 spelers
-  weeks_ahead: 4
+  weeks_ahead: 5
 
 providers:
   meetandplay:

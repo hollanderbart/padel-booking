@@ -60,6 +60,18 @@ class TestPlanRuns:
         runs = [r for r in plan_runs({"clubs": [DAILY_CLUB]}, BOOKING, NOW, NOW + timedelta(days=8)) if r.dates]
         assert [(r.at.date(), r.dates) for r in runs] == [(date(2026, 10, 21), ("2026-10-29",))]
 
+    def test_doeldag_die_later_binnen_bereik_komt_wordt_gepland(self):
+        # weeks_ahead=1: nu valt alleen 15-10 binnen bereik. Vanaf do 15-10 19:30 is dat 22-10,
+        # precies wanneer de rollende club (7 d) 22-10 19:30 vrijgeeft.
+        booking = {**BOOKING, "weeks_ahead": 1}
+        runs = [r for r in plan_runs({"clubs": [ROLLING_CLUB]}, booking, NOW, NOW + timedelta(days=2)) if r.dates]
+        assert runs and all(r.dates == ("2026-10-22",) for r in runs)
+
+    def test_vrijgave_voordat_doeldag_binnen_bereik_valt_wordt_niet_gepland(self):
+        club = {**ROLLING_CLUB, "window_days": 30}
+        booking = {**BOOKING, "weeks_ahead": 1}
+        assert not [r for r in plan_runs({"clubs": [club]}, booking, NOW, NOW + timedelta(days=7)) if r.dates]
+
     def test_leeg_schema_alleen_nachtelijke_run(self):
         runs = plan_runs({"clubs": []}, BOOKING, NOW, NOW + timedelta(days=1))
         assert len(runs) == 1 and not runs[0].dates

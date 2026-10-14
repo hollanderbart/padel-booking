@@ -60,7 +60,7 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 | `duration_minutes` | Duur van de boeking: `60` of `90` minuten |
 | `court_type` | Baantype: `indoor` of `outdoor` |
 | `game_type` | Speltype: `double` (4 spelers) of `single` (2 spelers) |
-| `weeks_ahead` | Aantal weken vooruit zoeken |
+| `weeks_ahead` | Aantal weken vooruit zoeken (standaard `5`, zodat ook clubs met een venster van ~30 dagen op hun vrijgavemoment geboekt worden) |
 | `meetandplay_enabled` | Meet & Play provider in/uitschakelen (standaard `true`) |
 | `schedule_mode` | `smart` (standaard): addon draait continu en boekt op het vrijgavemoment per club. `nightly`: één run per start van de addon (oude gedrag) |
 | `playtomic_enabled` | Playtomic provider in/uitschakelen (standaard `false`). **Tijdelijk genegeerd** — Playtomic staat uit sinds v2.3.1, zie Troubleshooting |
@@ -315,7 +315,8 @@ cache in `/config/padel/club_schedule.json`) en plant voor elke doeldag binnen `
 Een gerichte run gaat direct naar de clubpagina (geen zoekpagina) en wordt na 1 en 5 minuten herhaald
 als er nog niets vrij was. Clubs met strategie "onvoldoende data" of "blok" worden alleen door de
 nachtelijke run gedekt. Let op: een club met een venster groter dan `weeks_ahead` weken (bijv. 30 dagen
-bij `weeks_ahead: 4`) geeft zijn banen vrij vóórdat de doeldag binnen het zoekbereik valt.
+bij `weeks_ahead: 4`) geeft zijn banen vrij vóórdat de doeldag binnen het zoekbereik valt; met de
+standaard `weeks_ahead: 5` vallen vensters tot 35 dagen binnen bereik.
 
 Bekijk de geplande runs:
 
