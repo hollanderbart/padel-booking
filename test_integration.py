@@ -13,14 +13,14 @@ Uitvoeren:
   pytest test_integration.py -v -s --headed
 """
 
-import re
+import contextlib
 from datetime import datetime, timedelta
 
 import pytest
 from dotenv import load_dotenv
 from playwright.sync_api import Page, sync_playwright
 
-from providers.meetandplay.booking import MeetAndPlayBooker, SEARCH_URL
+from providers.meetandplay.booking import SEARCH_URL, SLOT_LABEL_JS, MeetAndPlayBooker
 
 # Laad .env zodat credentials beschikbaar zijn
 load_dotenv()
@@ -51,15 +51,12 @@ def _find_any_available_slot(page: Page, booker: MeetAndPlayBooker) -> dict | No
     radius = str(booker._booking["location"]["radius_km"])
 
     for day_offset in range(7):
-        date = datetime.now() + timedelta(days=day_offset)
-        date_str = date.strftime("%d-%m-%Y")
+        date_str = (datetime.now() + timedelta(days=day_offset)).strftime("%d-%m-%Y")
 
         page.goto(SEARCH_URL, wait_until="load", timeout=60000)
         page.wait_for_timeout(1500)
         booker._accept_cookies(page)
-
-        page.locator("select#sportId").select_option("2")
-        page.wait_for_timeout(1500)
+        booker._select_padel(page)
 
         loc_input = page.locator("input#location")
         loc_input.fill(city)
@@ -72,68 +69,37 @@ def _find_any_available_slot(page: Page, booker: MeetAndPlayBooker) -> dict | No
         page.locator("select#indoor").select_option("INDOOR")
         page.wait_for_timeout(1500)
 
-        lw_match = re.search(
-            r"window\.Livewire\.find\('([^']+)'\)\.set\('date'", page.content()
-        )
-        if lw_match:
-            page.evaluate(
-                f"window.Livewire.find('{lw_match.group(1)}').set('date', '{date_str}')"
-            )
-            page.wait_for_timeout(2000)
+        booker._set_livewire_date(page, date_str)
 
         cards = page.locator(".c-club-card.mp-club-card")
-        count = cards.count()
-
-        for club_idx in range(count):
+        clubs = []
+        for club_idx in range(cards.count()):
             card = cards.nth(club_idx)
-            try:
-                name = card.locator("h3").first.inner_text().strip()
-                book_url = card.locator("a.mp-cta-link").first.get_attribute("href") or ""
-                address = card.locator(".c-club-card__address").first.inner_text().strip()
-            except Exception:
-                continue
+            with contextlib.suppress(Exception):
+                clubs.append({
+                    "name": card.locator("h3").first.inner_text().strip(),
+                    "address": card.locator(".c-club-card__address").first.inner_text().strip(),
+                    "url": card.locator("a.mp-cta-link").first.get_attribute("href") or "",
+                })
 
-            if not book_url:
-                continue
-
-            club = {"name": name, "address": address, "url": book_url}
-
+        for club in (c for c in clubs if c["url"]):
             page.goto(club["url"], wait_until="load", timeout=60000)
             page.wait_for_timeout(1500)
             booker._accept_cookies(page)
-
-            sport_select = page.locator("select#sportId")
-            if sport_select.count() > 0:
-                sport_select.select_option("2")
-                page.wait_for_timeout(1500)
+            booker._select_padel(page)
 
             indoor_select = page.locator("select#indoor")
             if indoor_select.count() > 0:
                 indoor_select.select_option("INDOOR")
                 page.wait_for_timeout(1500)
 
-            lw_match = re.search(
-                r"window\.Livewire\.find\('([^']+)'\)\.set\('date'", page.content()
-            )
-            if lw_match:
-                page.evaluate(
-                    f"window.Livewire.find('{lw_match.group(1)}').set('date', '{date_str}')"
-                )
-                page.wait_for_timeout(2000)
+            booker._set_livewire_date(page, date_str)
 
-            slots = page.locator(".timeslot-container a.timeslot")
-
-            for i in range(slots.count()):
-                slot = slots.nth(i)
-
+            for slot in page.locator(".timeslot-container a.timeslot").all():
                 try:
-                    label = slot.evaluate("""el => {
-                        let s = el.closest('.timeslots');
-                        return s && s.previousElementSibling ? s.previousElementSibling.innerText : '';
-                    }""").lower()
+                    label = slot.evaluate(SLOT_LABEL_JS).lower()
                 except Exception:
                     label = ""
-
                 if "buiten" in label:
                     continue
 
@@ -143,15 +109,12 @@ def _find_any_available_slot(page: Page, booker: MeetAndPlayBooker) -> dict | No
                     time_text = "onbekend"
 
                 try:
-                    court_name = slot.locator(".timeslot-name").first.inner_text().strip()
-                    court_name = court_name.split("\n")[0].strip()
+                    court_name = slot.locator(".timeslot-name").first.inner_text().strip().split("\n")[0].strip()
                 except Exception:
                     court_name = "Onbekende baan"
 
-                slot_id = slot.get_attribute("id") or ""
-
                 return {
-                    "slot_id": slot_id,
+                    "slot_id": slot.get_attribute("id") or "",
                     "court_name": court_name,
                     "time_range": time_text.replace("\n", " "),
                     "club_name": club["name"],
@@ -165,110 +128,17 @@ def _find_any_available_slot(page: Page, booker: MeetAndPlayBooker) -> dict | No
 
 def _reach_checkout(page: Page, booker: MeetAndPlayBooker, slot_info: dict) -> str | None:
     """
-    Klik het tijdslot aan, voeg toe aan winkelwagen en klik Afrekenen.
-    Betaling wordt NIET afgerond — geeft de checkout-URL terug.
+    Doorloop de productie-flow (winkelwagen → afrekenen → betaalprovider).
+    Betaling wordt NIET afgerond — geeft de betaal-/checkout-URL terug.
     """
-    slot_id = slot_info["slot_id"]
-
     page.goto(slot_info["club_url"], wait_until="load", timeout=60000)
     page.wait_for_timeout(1500)
     booker._accept_cookies(page)
+    booker._set_livewire_date(page, slot_info["date_str"])
 
-    lw_match = re.search(
-        r"window\.Livewire\.find\('([^']+)'\)\.set\('date'", page.content()
-    )
-    if lw_match:
-        page.evaluate(
-            f"window.Livewire.find('{lw_match.group(1)}').set('date', '{slot_info['date_str']}')"
-        )
-        page.wait_for_timeout(2000)
-
-    slot_anchor = page.locator(f"a.timeslot[id='{slot_id}']")
-    if slot_anchor.count() == 0:
-        slot_anchor = page.locator(f"a[id='{slot_id}']")
-    if slot_anchor.count() == 0:
+    if not booker._book_timeslot(page, slot_info):
         return None
-
-    slot_anchor.first.click()
-    page.wait_for_timeout(2000)
-
-    add_btn = page.locator('button:has-text("Toevoegen")')
-    if add_btn.count() == 0:
-        add_btn = page.locator('button:has-text("Reserveren")')
-    if add_btn.count() == 0:
-        add_btn = page.locator('button:has-text("Boeken")')
-    if add_btn.count() == 0:
-        return None
-
-    add_btn.first.click()
-    page.wait_for_timeout(2500)
-
-    checkout_locators = [
-        f'button[wire\\:click="checkout({slot_id})"]:visible',
-        'button[wire\\:click="checkout"]:visible',
-        'button:visible:has-text("Afrekenen")',
-        'a:visible:has-text("Afrekenen")',
-    ]
-    checkout_btn = None
-    for selector in checkout_locators:
-        candidate = page.locator(selector)
-        if candidate.count() > 0:
-            checkout_btn = candidate
-            break
-
-    if checkout_btn is None:
-        return None
-
-    checkout_btn.first.click()
-
-    checkout_keywords = ["reserveren", "winkelwagen", "payment", "checkout", "betaling", "betalen", "order", "bestelling"]
-    try:
-        page.wait_for_url(
-            lambda url: any(kw in url.lower() for kw in checkout_keywords),
-            timeout=15000,
-        )
-    except Exception:
-        pass
-    page.wait_for_timeout(1500)
-
-    checkout_url = page.url
-
-    on_checkout = any(kw in checkout_url.lower() for kw in checkout_keywords) or \
-                  "Winkelwagen" in page.content()
-    if not on_checkout:
-        return None
-
-    tos_checkbox = page.locator("input#tos")
-    try:
-        tos_checkbox.wait_for(state="visible", timeout=10000)
-    except Exception:
-        pass
-    if tos_checkbox.count() > 0 and not tos_checkbox.is_checked():
-        page.evaluate("document.querySelector('input#tos').click()")
-        page.wait_for_timeout(1000)
-
-    pay_btn = page.locator('button:has-text("Betaling starten")')
-    if pay_btn.count() == 0:
-        for sel in ['button:has-text("Betalen")', 'button:has-text("Nu betalen")', 'a:has-text("Betalen")']:
-            candidate = page.locator(sel)
-            if candidate.count() > 0 and candidate.first.is_visible():
-                pay_btn = candidate
-                break
-
-    if pay_btn.count() == 0 or not pay_btn.first.is_visible():
-        return checkout_url
-
-    pay_btn.first.click()
-    try:
-        page.wait_for_url(
-            lambda url: url != checkout_url,
-            timeout=20000,
-        )
-    except Exception:
-        pass
-    page.wait_for_timeout(2000)
-
-    return page.url
+    return slot_info["payment_url"]
 
 
 def test_full_booking_flow(headed):
@@ -294,10 +164,8 @@ def test_full_booking_flow(headed):
     context = None
 
     with sync_playwright() as pw:
-        booker._playwright = pw
         browser = pw.chromium.launch(headless=not headed)
-        context = booker._make_context(browser)
-        context = booker._ensure_logged_in(browser, context)
+        context = booker._ensure_logged_in(browser, booker.session_manager.new_context(browser))
 
         try:
             page = context.new_page()
@@ -329,15 +197,7 @@ def test_full_booking_flow(headed):
             print("=" * 60 + "\n")
 
         finally:
-            if context:
-                try:
-                    context.close()
-                except Exception:
-                    pass
-            if browser:
-                try:
-                    browser.close()
-                except Exception:
-                    pass
-
-        booker._playwright = None
+            for resource in (context, browser):
+                if resource:
+                    with contextlib.suppress(Exception):
+                        resource.close()

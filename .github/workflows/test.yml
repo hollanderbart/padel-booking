@@ -18,10 +18,18 @@ jobs:
           cache: pip
 
       - name: Installeer dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt ruff
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Controleer sync naar padel_booking/
+        run: |
+          for f in orchestrator.py notify.py fetch_bookings.py; do diff -q "$f" "padel_booking/$f"; done
+          diff -rq --exclude=__pycache__ providers padel_booking/providers
 
       - name: Draai unit tests
-        run: pytest test_unit.py -v
+        run: pytest tests -v
 
   integration-test:
     name: Integratietest (met credentials)

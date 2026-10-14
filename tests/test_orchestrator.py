@@ -4,23 +4,21 @@ Unit tests voor orchestrator.py — geen browser of credentials nodig.
 
 import asyncio
 import json
-from datetime import date, datetime, timedelta
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import date, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
 
 from orchestrator import (
     _get_furthest_target_date,
-    append_booking_history,
     build_provider_request,
+    enabled_providers,
     is_already_booked,
     load_config,
     run_all_providers,
     run_provider,
     save_booking_state,
-    write_last_run,
 )
 
 
@@ -102,14 +100,12 @@ class TestIsAlreadyBooked:
 
     def test_verste_doeldatum_geboekt_retourneert_true(self, tmp_path):
         """Als de boekingsdatum >= de verste doeldatum is, overslaan."""
-        from orchestrator import _get_furthest_target_date
         furthest = _get_furthest_target_date(self.BOOKING_CFG)
         f = tmp_path / "state.json"
         f.write_text(json.dumps({"booked_date": furthest.isoformat()}))
         assert is_already_booked(f, self.BOOKING_CFG) is True
 
     def test_datum_voorbij_verste_doeldatum_retourneert_true(self, tmp_path):
-        from orchestrator import _get_furthest_target_date
         furthest = _get_furthest_target_date(self.BOOKING_CFG)
         ver_weg = (furthest + timedelta(weeks=2)).isoformat()
         f = tmp_path / "state.json"
@@ -118,7 +114,6 @@ class TestIsAlreadyBooked:
 
     def test_datum_voor_verste_doeldatum_retourneert_false(self, tmp_path):
         """Als er nog latere data in het zoekvenster zitten, doorgaan met zoeken."""
-        from orchestrator import _get_furthest_target_date
         furthest = _get_furthest_target_date(self.BOOKING_CFG)
         eerder = (furthest - timedelta(weeks=1)).isoformat()
         f = tmp_path / "state.json"
@@ -328,3 +323,27 @@ class TestRunAllProviders:
             result = await run_all_providers([("meetandplay", {}), ("playtomic", {})], debug=False)
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# enabled_providers
+# ---------------------------------------------------------------------------
+
+
+class TestEnabledProviders:
+    def test_standaard_alleen_meetandplay(self, monkeypatch):
+        monkeypatch.setenv("KNLTB_EMAIL", "a@b.nl")
+        result = enabled_providers({})
+        assert [spec.name for spec, _, _ in result] == ["meetandplay"]
+        _, credentials, provider_cfg = result[0]
+        assert credentials["email"] == "a@b.nl"
+        assert provider_cfg == {"cookies_file": ".meetandplay_cookies.json"}
+
+    def test_playtomic_inschakelen_met_eigen_tokenbestand(self):
+        config = {"providers": {
+            "meetandplay": {"enabled": False},
+            "playtomic": {"enabled": True, "token_cache_file": "/data/t.json"},
+        }}
+        result = enabled_providers(config)
+        assert [spec.name for spec, _, _ in result] == ["playtomic"]
+        assert result[0][2] == {"token_cache_file": "/data/t.json"}

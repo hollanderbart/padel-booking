@@ -15,24 +15,49 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from dotenv import load_dotenv
 
 from notify import notify_booking_available
+from providers.base import upcoming_booking_dates
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = "config.yaml"
+# Providers loggen zelf al een timestamp + level; strip die om dubbele prefixes te voorkomen
+PROVIDER_LOG_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+\w+\s+")
+
+
+@dataclass(frozen=True)
+class ProviderSpec:
+    name: str
+    enabled_by_default: bool
+    email_env: str
+    password_env: str
+    session_file_key: str
+    default_session_file: str
+
+
+PROVIDERS = [
+    ProviderSpec("meetandplay", True, "KNLTB_EMAIL", "KNLTB_PASSWORD",
+                 "cookies_file", ".meetandplay_cookies.json"),
+    ProviderSpec("playtomic", False, "PLAYTOMIC_EMAIL", "PLAYTOMIC_PASSWORD",
+                 "token_cache_file", ".playtomic_token.json"),
+]
+
+
+def setup_logging(debug: bool = False) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if debug else logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -43,37 +68,61 @@ def load_config(config_path: str = CONFIG_PATH) -> dict:
     config_file = Path(config_path)
     if not config_file.exists():
         raise FileNotFoundError(f"Configuratiebestand niet gevonden: {config_path}")
-    with open(config_file) as f:
+    with open(config_file, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def enabled_providers(config: dict) -> list[tuple[ProviderSpec, dict, dict]]:
+    """
+    Geef per ingeschakelde provider (spec, credentials, provider_config) terug.
+    Logt welke providers in- of uitgeschakeld zijn.
+    """
+    providers_config = config.get("providers", {})
+    result = []
+    for spec in PROVIDERS:
+        cfg = providers_config.get(spec.name, {})
+        if not cfg.get("enabled", spec.enabled_by_default):
+            logger.info("Provider '%s' uitgeschakeld", spec.name)
+            continue
+        logger.info("Provider '%s' ingeschakeld", spec.name)
+        credentials = {
+            "email": os.getenv(spec.email_env, ""),
+            "password": os.getenv(spec.password_env, ""),
+        }
+        provider_cfg = {spec.session_file_key: cfg.get(spec.session_file_key, spec.default_session_file)}
+        result.append((spec, credentials, provider_cfg))
+    return result
+
+
+def _write_json(path: Path, data, what: str) -> bool:
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except OSError as e:
+        logger.warning("Fout bij schrijven %s: %s", what, e)
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
 # Deduplicatie
 # ---------------------------------------------------------------------------
 
-WEEKDAYS = {
-    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-    "friday": 4, "saturday": 5, "sunday": 6,
-}
-
-
-def _get_furthest_target_date(booking_cfg: dict) -> datetime.date:
-    """Bereken de verste doeldatum in het zoekvenster (weeks_ahead weken vooruit)."""
-    target_day_name = booking_cfg.get("day", "thursday").lower()
-    target_weekday = WEEKDAYS.get(target_day_name, 3)
-    weeks_ahead = booking_cfg.get("weeks_ahead", 4)
-
-    today = datetime.now()
-    days_ahead = (target_weekday - today.weekday()) % 7 or 7
-    first_date = (today + timedelta(days=days_ahead)).date()
-    return first_date + timedelta(weeks=weeks_ahead - 1)
+def _get_furthest_target_date(booking_cfg: dict) -> date:
+    """Bereken de verste doeldatum in het zoekvenster — dezelfde datums als de providers doorzoeken."""
+    dates = upcoming_booking_dates(
+        booking_cfg.get("day", "thursday"),
+        booking_cfg.get("time_start", "00:00"),
+        count=booking_cfg.get("weeks_ahead", 4),
+    )
+    return dates[-1].date()
 
 
 def is_already_booked(state_file: Path, booking_cfg: dict) -> bool:
     if not state_file.exists():
         return False
     try:
-        with open(state_file) as f:
+        with open(state_file, encoding="utf-8") as f:
             state = json.load(f)
         booked_date = datetime.strptime(state["booked_date"], "%Y-%m-%d").date()
         furthest_date = _get_furthest_target_date(booking_cfg)
@@ -90,7 +139,7 @@ def is_already_booked(state_file: Path, booking_cfg: dict) -> bool:
             furthest_date.isoformat(),
         )
         return False
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — corrupte state mag een boeking nooit blokkeren
         logger.warning("Fout bij lezen booking state: %s — doorgaan met boeken", e)
         return False
 
@@ -107,12 +156,8 @@ def save_booking_state(state_file: Path, booked_date: str, slot_info: dict, prov
             "club_address": slot_info.get("club_address", ""),
         },
     }
-    try:
-        with open(state_file, "w") as f:
-            json.dump(state, f, indent=2)
+    if _write_json(state_file, state, "booking state"):
         logger.info("Booking state opgeslagen: %s via %s op %s", slot_info.get("club_name"), provider, booked_date)
-    except Exception as e:
-        logger.warning("Fout bij opslaan booking state: %s", e)
 
 
 def append_booking_history(history_file: Path, booked_date: str, slot_info: dict, provider: str) -> None:
@@ -126,33 +171,26 @@ def append_booking_history(history_file: Path, booked_date: str, slot_info: dict
         "time_range": slot_info.get("time_range", ""),
         "payment_url": slot_info.get("payment_url", ""),
     }
-    try:
-        if history_file.exists():
-            with open(history_file) as f:
+    history = []
+    if history_file.exists():
+        try:
+            with open(history_file, encoding="utf-8") as f:
                 history = json.load(f)
-        else:
-            history = []
-        history.insert(0, entry)
-        history = history[:20]
-        with open(history_file, "w") as f:
-            json.dump(history, f, indent=2)
+        except (OSError, ValueError) as e:
+            logger.warning("Fout bij schrijven boekingsgeschiedenis: %s", e)
+            return
+    if _write_json(history_file, [entry, *history][:20], "boekingsgeschiedenis"):
         logger.info("Boekingsgeschiedenis bijgewerkt: %s", history_file)
-    except Exception as e:
-        logger.warning("Fout bij schrijven boekingsgeschiedenis: %s", e)
 
 
-def write_last_run(last_run_file: Path, success: bool, provider: Optional[str] = None) -> None:
-    try:
-        data = {
-            "last_run": datetime.now().isoformat(timespec="seconds"),
-            "success": success,
-        }
-        if provider:
-            data["winning_provider"] = provider
-        with open(last_run_file, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        logger.warning("Fout bij schrijven last_run: %s", e)
+def write_last_run(last_run_file: Path, success: bool, provider: str | None = None) -> None:
+    data = {
+        "last_run": datetime.now().isoformat(timespec="seconds"),
+        "success": success,
+    }
+    if provider:
+        data["winning_provider"] = provider
+    _write_json(last_run_file, data, "last_run")
 
 
 # ---------------------------------------------------------------------------
@@ -181,15 +219,9 @@ async def run_provider(name: str, request: dict, debug: bool) -> dict:
         input_data = json.dumps(request).encode()
         stdout, stderr = await proc.communicate(input=input_data)
 
-        # Log provider stderr — strip de eigen timestamp/level prefix van de provider
-        # zodat er geen dubbele "INFO [x] 2026-... INFO [x] ..." regels ontstaan
-        if stderr:
-            for line in stderr.decode(errors="replace").splitlines():
-                if line.strip():
-                    # Verwijder de timestamp+level prefix als die aanwezig is (provider logt die zelf al)
-                    import re as _re
-                    clean = _re.sub(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+\w+\s+", "", line)
-                    logger.info(clean)
+        for line in stderr.decode(errors="replace").splitlines():
+            if line.strip():
+                logger.info(PROVIDER_LOG_PREFIX.sub("", line))
 
         if not stdout.strip():
             logger.warning("Provider '%s' gaf geen output (exit code: %s)", name, proc.returncode)
@@ -205,12 +237,12 @@ async def run_provider(name: str, request: dict, debug: bool) -> dict:
     except asyncio.CancelledError:
         logger.info("Provider '%s' geannuleerd", name)
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — een crashende provider mag de andere niet stoppen
         logger.warning("Provider '%s' fout: %s", name, e)
         return {"success": False, "provider": name, "error": str(e)}
 
 
-async def run_all_providers(provider_requests: list[tuple[str, dict]], debug: bool) -> Optional[dict]:
+async def run_all_providers(provider_requests: list[tuple[str, dict]], debug: bool) -> dict | None:
     """
     Start alle providers parallel. Geeft het resultaat van de eerste
     die succes meldt terug, en annuleert de rest.
@@ -232,7 +264,7 @@ async def run_all_providers(provider_requests: list[tuple[str, dict]], debug: bo
                 result = task.result()
             except asyncio.CancelledError:
                 continue
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Taak '%s' gooit exception: %s", task.get_name(), e)
                 continue
 
@@ -260,7 +292,7 @@ def load_future_booking_dates(future_bookings_file: Path) -> set[str]:
     if not future_bookings_file.exists():
         return set()
     try:
-        with open(future_bookings_file) as f:
+        with open(future_bookings_file, encoding="utf-8") as f:
             bookings = json.load(f)
         dates = {b["booked_date"] for b in bookings if b.get("booked_date")}
         logger.info(
@@ -268,7 +300,7 @@ def load_future_booking_dates(future_bookings_file: Path) -> set[str]:
             ", ".join(sorted(dates)) if dates else "(geen)",
         )
         return dates
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Fout bij lezen future_bookings: %s — skip_booked_dates wordt genegeerd", e)
         return set()
 
@@ -297,6 +329,33 @@ def build_provider_request(config: dict, credentials: dict, provider_config: dic
     }
 
 
+def _load_skip_dates(config: dict) -> set[str]:
+    """skip_booked_dates: datums die al voorkomen in future_bookings.json."""
+    fetch_cfg = config.get("fetch_bookings", {})
+    if not fetch_cfg.get("skip_booked_dates", False):
+        logger.info("skip_booked_dates uitgeschakeld")
+        return set()
+
+    skip_dates = load_future_booking_dates(Path(fetch_cfg.get("output_file", "future_bookings.json")))
+    if skip_dates:
+        logger.info("skip_booked_dates ingeschakeld — %d datum(s) worden overgeslagen", len(skip_dates))
+    else:
+        logger.info("skip_booked_dates ingeschakeld — geen bestaande boekingen gevonden")
+    return skip_dates
+
+
+def _print_summary(provider: str, slot_info: dict) -> None:
+    print("\n" + "=" * 60)
+    print(f"BESCHIKBAARHEID GEVONDEN via {provider.upper()}")
+    print("=" * 60)
+    print(f"Club:    {slot_info['club_name']}")
+    print(f"Adres:   {slot_info['club_address']}")
+    print(f"Baan:    {slot_info['court_name']}")
+    print(f"Tijd:    {slot_info['time_range']}")
+    print(f"Boek nu: {slot_info.get('payment_url', '')}")
+    print("=" * 60 + "\n")
+
+
 async def main_async(debug: bool, dry_run: bool) -> int:
     load_dotenv()
 
@@ -315,57 +374,11 @@ async def main_async(debug: bool, dry_run: bool) -> int:
         write_last_run(last_run_file, success=True)
         return 0
 
-    # skip_booked_dates: sla datums over die al voorkomen in future_bookings.json
-    skip_dates: set[str] = set()
-    fetch_cfg = config.get("fetch_bookings", {})
-    if fetch_cfg.get("skip_booked_dates", False):
-        future_bookings_file = Path(fetch_cfg.get("output_file", "future_bookings.json"))
-        skip_dates = load_future_booking_dates(future_bookings_file)
-        if skip_dates:
-            logger.info("skip_booked_dates ingeschakeld — %d datum(s) worden overgeslagen", len(skip_dates))
-        else:
-            logger.info("skip_booked_dates ingeschakeld — geen bestaande boekingen gevonden")
-    else:
-        logger.info("skip_booked_dates uitgeschakeld")
-
-    providers_config = config.get("providers", {})
-    provider_requests = []
-
-    # Meet & Play
-    map_config = providers_config.get("meetandplay", {})
-    if map_config.get("enabled", True):
-        credentials = {
-            "email": os.getenv("KNLTB_EMAIL", ""),
-            "password": os.getenv("KNLTB_PASSWORD", ""),
-        }
-        provider_cfg = {
-            "cookies_file": map_config.get("cookies_file", ".meetandplay_cookies.json"),
-        }
-        provider_requests.append((
-            "meetandplay",
-            build_provider_request(config, credentials, provider_cfg, dry_run, skip_dates),
-        ))
-        logger.info("Provider 'meetandplay' ingeschakeld")
-    else:
-        logger.info("Provider 'meetandplay' uitgeschakeld")
-
-    # Playtomic
-    pt_config = providers_config.get("playtomic", {})
-    if pt_config.get("enabled", False):
-        credentials = {
-            "email": os.getenv("PLAYTOMIC_EMAIL", ""),
-            "password": os.getenv("PLAYTOMIC_PASSWORD", ""),
-        }
-        provider_cfg = {
-            "token_cache_file": pt_config.get("token_cache_file", ".playtomic_token.json"),
-        }
-        provider_requests.append((
-            "playtomic",
-            build_provider_request(config, credentials, provider_cfg, dry_run, skip_dates),
-        ))
-        logger.info("Provider 'playtomic' ingeschakeld")
-    else:
-        logger.info("Provider 'playtomic' uitgeschakeld")
+    skip_dates = _load_skip_dates(config)
+    provider_requests = [
+        (spec.name, build_provider_request(config, credentials, provider_cfg, dry_run, skip_dates))
+        for spec, credentials, provider_cfg in enabled_providers(config)
+    ]
 
     if not provider_requests:
         logger.error("Geen providers ingeschakeld — controleer config.yaml")
@@ -374,48 +387,37 @@ async def main_async(debug: bool, dry_run: bool) -> int:
 
     result = await run_all_providers(provider_requests, debug=debug)
 
-    if result and result.get("success"):
-        provider = result["provider"]
-        booked_date = result["booked_date"]
-        slot_info = result["slot_info"]
-
-        if not dry_run:
-            save_booking_state(state_file, booked_date, slot_info, provider)
-            append_booking_history(history_file, booked_date, slot_info, provider)
-
-        write_last_run(last_run_file, success=True, provider=provider)
-
-        notify_booking_available(
-            slot_info["court_name"],
-            slot_info["time_range"],
-            f"{slot_info['club_name']} — {slot_info['club_address']}",
-            slot_info.get("payment_url", ""),
-            booked_date,
-            provider,
-        )
-
-        print("\n" + "=" * 60)
-        print(f"BESCHIKBAARHEID GEVONDEN via {provider.upper()}")
-        print("=" * 60)
-        print(f"Club:    {slot_info['club_name']}")
-        print(f"Adres:   {slot_info['club_address']}")
-        print(f"Baan:    {slot_info['court_name']}")
-        print(f"Tijd:    {slot_info['time_range']}")
-        print(f"Boek nu: {slot_info.get('payment_url', '')}")
-        print("=" * 60 + "\n")
-        return 0
-    else:
+    if not (result and result.get("success")):
         logger.warning("Geen boeking gemaakt door alle providers")
         write_last_run(last_run_file, success=False)
         return 1
+
+    provider = result["provider"]
+    booked_date = result["booked_date"]
+    slot_info = result["slot_info"]
+
+    if not dry_run:
+        save_booking_state(state_file, booked_date, slot_info, provider)
+        append_booking_history(history_file, booked_date, slot_info, provider)
+
+    write_last_run(last_run_file, success=True, provider=provider)
+
+    notify_booking_available(
+        slot_info["court_name"],
+        slot_info["time_range"],
+        f"{slot_info['club_name']} — {slot_info['club_address']}",
+        slot_info.get("payment_url", ""),
+        booked_date,
+        provider,
+    )
+    _print_summary(provider, slot_info)
+    return 0
 
 
 def main() -> None:
     debug = "--debug" in sys.argv
     dry_run = "--dry-run" in sys.argv
-
-    if debug:
-        logging.getLogger().setLevel(logging.DEBUG)
+    setup_logging(debug)
 
     exit_code = asyncio.run(main_async(debug=debug, dry_run=dry_run))
     sys.exit(exit_code)

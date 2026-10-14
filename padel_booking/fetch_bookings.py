@@ -11,197 +11,251 @@ Gebruik:
 """
 
 import argparse
+import contextlib
 import json
 import logging
-import os
+import re
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 
-import yaml
 from dotenv import load_dotenv
 
+from orchestrator import enabled_providers, load_config
+from providers.base import hhmm_to_minutes
+from providers.playtomic.booking import format_address
+from providers.playtomic.client import PlaytomicAuthError, PlaytomicClient
+
 logger = logging.getLogger(__name__)
-
-CONFIG_PATH = "config.yaml"
-API_BASE_PLAYTOMIC = "https://api.playtomic.io"
-
-
-# ---------------------------------------------------------------------------
-# Configuratie
-# ---------------------------------------------------------------------------
-
-def load_config(config_path: str = CONFIG_PATH) -> dict:
-    config_file = Path(config_path)
-    if not config_file.exists():
-        raise FileNotFoundError(f"Configuratiebestand niet gevonden: {config_path}")
-    with open(config_file) as f:
-        return yaml.safe_load(f)
 
 
 # ---------------------------------------------------------------------------
 # Playtomic — toekomstige boekingen via REST API
 # ---------------------------------------------------------------------------
 
+def _playtomic_match_to_booking(match: dict) -> dict | None:
+    start_raw = match.get("start_date", "")
+    if not start_raw:
+        return None
+
+    try:
+        local_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00")).astimezone()
+        booked_date = local_dt.strftime("%Y-%m-%d")
+        start_time = local_dt.strftime("%H:%M")
+    except ValueError:
+        booked_date = start_raw[:10]
+        start_time = start_raw[11:16] if len(start_raw) > 10 else "?"
+
+    try:
+        end_min = hhmm_to_minutes(start_time) + int(match.get("duration", 0))
+        end_time = f"{end_min // 60:02d}:{end_min % 60:02d}"
+    except (TypeError, ValueError):
+        end_time = "?"
+
+    tenant = match.get("tenant") or {}
+    address = tenant.get("address") or {}
+    resource = match.get("resource") or {}
+    match_id = match.get("match_id", "") or match.get("id", "")
+
+    return {
+        "booked_date": booked_date,
+        "provider": "playtomic",
+        "club_name": tenant.get("tenant_name", "") or match.get("tenant_name", ""),
+        "club_address": address.get("full_address") or format_address(address),
+        "court_name": resource.get("resource_name", "") or "Padelbaan",
+        "time_range": f"{start_time} - {end_time}",
+        "payment_url": f"https://playtomic.io/booking/{match_id}" if match_id else "",
+        "status": "confirmed",
+    }
+
+
 def fetch_playtomic_bookings(email: str, password: str, token_cache_file: str) -> list[dict]:
     """
     Haalt toekomstige boekingen op via de Playtomic API.
     Endpoint: GET /v1/matches?user_id=<id>&status=CONFIRMED&start_min=<now>
     """
-    import requests
-
-    HEADERS = {
-        "X-Requested-With": "com.playtomic.web",
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Content-Type": "application/json",
-    }
-
-    session = requests.Session()
-    session.headers.update(HEADERS)
-
-    # Token laden of ophalen
-    token_path = Path(token_cache_file)
-    access_token = None
-    user_id = None
-
-    if token_path.exists():
-        try:
-            with open(token_path) as f:
-                cached = json.load(f)
-            expiry = datetime.fromisoformat(cached["expiry"])
-            if expiry.tzinfo is None:
-                expiry = expiry.replace(tzinfo=timezone.utc)
-            from datetime import timedelta
-            if expiry > datetime.now(tz=timezone.utc) + timedelta(minutes=5):
-                access_token = cached["access_token"]
-                user_id = cached.get("user_id")
-                logger.info("Playtomic token geladen uit cache (verloopt %s)", expiry.isoformat())
-        except Exception as e:
-            logger.debug("Kon Playtomic token cache niet laden: %s", e)
-
-    if not access_token:
-        logger.info("Inloggen bij Playtomic als %s...", email)
-        resp = session.post(
-            f"{API_BASE_PLAYTOMIC}/v3/auth/login",
-            json={"email": email, "password": password},
-        )
-        if resp.status_code == 401:
-            logger.error("Playtomic inloggen mislukt — controleer PLAYTOMIC_EMAIL/PLAYTOMIC_PASSWORD")
-            return []
-        resp.raise_for_status()
-        data = resp.json()
-        access_token = data["access_token"]
-        user_id = data.get("user_id")
-        expiry_str = data.get("access_token_expiration")
-        if expiry_str:
-            from datetime import timedelta
-            expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
-        else:
-            from datetime import timedelta
-            expiry = datetime.now(tz=timezone.utc) + timedelta(hours=1)
-        try:
-            with open(token_path, "w") as f:
-                json.dump({"access_token": access_token, "expiry": expiry.isoformat(), "user_id": user_id}, f)
-        except Exception as e:
-            logger.warning("Kon Playtomic token niet opslaan: %s", e)
-
-    session.headers["Authorization"] = f"Bearer {access_token}"
-
-    if not user_id:
-        logger.warning("Playtomic user_id niet beschikbaar — boekingen ophalen niet mogelijk")
-        return []
-
-    now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-
-    logger.info("Playtomic toekomstige boekingen ophalen voor user %s...", user_id)
-
-    # Haal matches op die bevestigd zijn en in de toekomst liggen
+    client = PlaytomicClient(email=email, password=password, token_cache_file=token_cache_file)
     try:
-        resp = session.get(
-            f"{API_BASE_PLAYTOMIC}/v1/matches",
-            params={
-                "user_id": user_id,
-                "status": "CONFIRMED",
-                "start_min": now_str,
-                "size": 50,
-                "sort": "start_date,asc",
-            },
-        )
-        resp.raise_for_status()
-        raw = resp.json()
-        # De API geeft een gepagineerd object terug: {"content": [...], ...}
-        # of een kale lijst bij oudere endpoints.
-        if isinstance(raw, dict):
-            matches = raw.get("content") or raw.get("data") or raw.get("matches") or []
-        else:
-            matches = raw
-    except Exception as e:
+        matches = client.get_upcoming_matches()
+    except PlaytomicAuthError as e:
+        logger.error("%s", e)
+        return []
+    except Exception as e:  # noqa: BLE001 — ophalen is best-effort
         logger.warning("Playtomic boekingen ophalen mislukt: %s", e)
         return []
 
     logger.info("%d Playtomic boeking(en) gevonden", len(matches))
-
     bookings = []
     for match in matches:
         try:
-            start_raw = match.get("start_date", "")
-            if not start_raw:
-                continue
-
-            # Parseer start tijd
-            try:
-                start_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
-                # Converteer naar lokale tijd
-                local_dt = start_dt.astimezone()
-                booked_date = local_dt.strftime("%Y-%m-%d")
-                start_time = local_dt.strftime("%H:%M")
-            except Exception:
-                booked_date = start_raw[:10]
-                start_time = start_raw[11:16] if len(start_raw) > 10 else "?"
-
-            duration = match.get("duration", 0)
-            try:
-                end_h = int(start_time[:2]) * 60 + int(start_time[3:]) + int(duration)
-                end_time = f"{end_h // 60:02d}:{end_h % 60:02d}"
-            except Exception:
-                end_time = "?"
-
-            # Club/locatie info
-            tenant = match.get("tenant", {}) or {}
-            club_name = tenant.get("tenant_name", "") or match.get("tenant_name", "")
-            address = tenant.get("address", {}) or {}
-            club_address = address.get("full_address") or ", ".join(filter(None, [address.get("street", ""), address.get("city", "")]))
-
-            # Court info
-            resource = match.get("resource", {}) or {}
-            court_name = resource.get("resource_name", "") or "Padelbaan"
-
-            match_id = match.get("match_id", "") or match.get("id", "")
-            payment_url = f"https://playtomic.io/booking/{match_id}" if match_id else ""
-
-            bookings.append({
-                "booked_date": booked_date,
-                "provider": "playtomic",
-                "club_name": club_name,
-                "club_address": club_address,
-                "court_name": court_name,
-                "time_range": f"{start_time} - {end_time}",
-                "payment_url": payment_url,
-                "status": "confirmed",
-            })
-        except Exception as e:
+            booking = _playtomic_match_to_booking(match)
+        except Exception as e:  # noqa: BLE001
             logger.debug("Fout bij verwerken Playtomic boeking: %s", e)
-
+            continue
+        if booking:
+            bookings.append(booking)
     return bookings
 
 
 # ---------------------------------------------------------------------------
 # Meet & Play — toekomstige boekingen via Playwright scraping
 # ---------------------------------------------------------------------------
+
+MEETANDPLAY_RESERVATIONS_URL = "https://www.meetandplay.nl/mijn-reserveringen"
+CARD_SELECTORS = [
+    ".c-reservation-card",
+    ".reservation-card",
+    "[class*='reservation-item']",
+    "[class*='booking-card']",
+    ".mp-reservation",
+]
+DATE_SELECTORS = [".c-reservation-card__date", ".reservation-date", "[class*='date']", "time"]
+CLUB_SELECTORS = [".c-reservation-card__club", ".club-name", "[class*='club']", "h3", "h4"]
+TIME_SELECTORS = [".c-reservation-card__time", ".reservation-time", "[class*='time']"]
+COURT_SELECTORS = [".c-reservation-card__court", ".court-name", "[class*='court']", "[class*='field']"]
+PAYMENT_LINK_SELECTOR = "a[href*='betalen'], a[href*='payment'], a[href*='checkout'], a[href*='reservering']"
+
+DUTCH_MONTHS = {
+    "januari": 1, "februari": 2, "maart": 3, "april": 4,
+    "mei": 5, "juni": 6, "juli": 7, "augustus": 8,
+    "september": 9, "oktober": 10, "november": 11, "december": 12,
+    "jan": 1, "feb": 2, "mrt": 3, "apr": 4, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "okt": 10, "nov": 11, "dec": 12,
+}
+
+
+def _first_text(card, selectors: list[str], first_line: bool = False) -> str:
+    """Tekst van het eerste niet-lege element dat een van de selectors matcht."""
+    for selector in selectors:
+        el = card.locator(selector)
+        if el.count() > 0:
+            text = el.first.inner_text().strip()
+            if first_line:
+                text = text.split("\n")[0]
+            if text:
+                return text
+    return ""
+
+
+def _card_date(card, card_text: str) -> str:
+    for selector in DATE_SELECTORS:
+        el = card.locator(selector)
+        if el.count() == 0:
+            continue
+        # Parseer "donderdag 3 april 2026" of "03-04-2026" of ISO
+        date_str = _parse_dutch_date(el.first.inner_text().strip())
+        if date_str:
+            return date_str
+        dt_attr = el.first.get_attribute("datetime")
+        if dt_attr:
+            return dt_attr[:10]
+
+    date_match = re.search(r"\b(\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}-\d{2}-\d{2})\b", card_text)
+    return _parse_dutch_date(date_match.group(1)) if date_match else ""
+
+
+def _parse_reservation_card(card, i: int, today: date) -> dict | None:
+    card_text = card.inner_text()
+    logger.debug("Reserveringskaart %d tekst: %s", i, card_text[:200])
+
+    date_str = _card_date(card, card_text)
+    if not date_str:
+        logger.debug("Geen datum gevonden in kaart %d", i)
+        return None
+
+    # Alleen toekomstige boekingen
+    with contextlib.suppress(ValueError):
+        if datetime.strptime(date_str, "%Y-%m-%d").date() < today:
+            return None
+
+    club_name = _first_text(card, CLUB_SELECTORS, first_line=True)
+    time_range = _first_text(card, TIME_SELECTORS)
+    court_name = _first_text(card, COURT_SELECTORS, first_line=True)
+
+    payment_url = ""
+    link = card.locator(PAYMENT_LINK_SELECTOR)
+    if link.count() > 0:
+        payment_url = link.first.get_attribute("href") or ""
+        if payment_url and not payment_url.startswith("http"):
+            payment_url = f"https://www.meetandplay.nl{payment_url}"
+
+    logger.info("Reservering gevonden: %s op %s om %s", club_name, date_str, time_range)
+    return {
+        "booked_date": date_str,
+        "provider": "meetandplay",
+        "club_name": club_name or "Meet & Play",
+        "club_address": "",
+        "court_name": court_name or "Padelbaan",
+        "time_range": time_range,
+        "payment_url": payment_url,
+        "status": "confirmed",
+    }
+
+
+def _logged_in_context(browser, session_mgr, email: str, password: str):
+    """Geef een ingelogde browsercontext terug, of None als inloggen niet lukt."""
+    context = session_mgr.new_context(browser)
+    page = context.new_page()
+    logged_in = session_mgr.is_logged_in(page)
+    page.close()
+    if logged_in:
+        return context
+
+    logger.info("Meet & Play sessie verlopen — opnieuw inloggen...")
+    context.close()
+    if not email or not password:
+        logger.warning("Geen Meet & Play credentials — boekingen overgeslagen")
+        return None
+
+    context, success = session_mgr.auto_login(browser, email, password)
+    if not success:
+        logger.warning("Meet & Play inloggen mislukt — boekingen overgeslagen")
+        return None
+    return context
+
+
+def _scrape_reservations(page) -> list[dict]:
+    from providers.meetandplay.session import accept_cookie_banner
+
+    logger.info("Meet & Play reserveringen ophalen...")
+    page.goto(MEETANDPLAY_RESERVATIONS_URL, wait_until="load", timeout=30000)
+    page.wait_for_timeout(2000)
+    accept_cookie_banner(page)
+
+    # Wacht op reserveringen of "geen reserveringen" bericht
+    with contextlib.suppress(Exception):
+        page.wait_for_selector(
+            '.c-reservation-card, .reservation-card, [class*="reservation"], .c-alert',
+            timeout=10000,
+        )
+
+    cards = None
+    for selector in CARD_SELECTORS:
+        candidate = page.locator(selector)
+        if candidate.count() > 0:
+            cards = candidate
+            logger.info("Reserveringskaarten gevonden via selector: %s (%d stuks)", selector, candidate.count())
+            break
+
+    if cards is None:
+        logger.info("Geen reserveringskaarten gevonden op Meet & Play (pagina-inhoud check)")
+        page_text = page.inner_text("body").lower()
+        if "geen reservering" in page_text or "no reservation" in page_text:
+            logger.info("Meet & Play meldt: geen reserveringen")
+        return []
+
+    today = datetime.now().date()
+    bookings = []
+    for i in range(cards.count()):
+        try:
+            booking = _parse_reservation_card(cards.nth(i), i, today)
+        except Exception as e:  # noqa: BLE001 — één onleesbare kaart mag de rest niet blokkeren
+            logger.debug("Fout bij verwerken reserveringskaart %d: %s", i, e)
+            continue
+        if booking:
+            bookings.append(booking)
+    return bookings
+
 
 def fetch_meetandplay_bookings(email: str, password: str, cookies_file: str) -> list[dict]:
     """
@@ -217,197 +271,19 @@ def fetch_meetandplay_bookings(email: str, password: str, cookies_file: str) -> 
     from providers.meetandplay.session import SessionManager
 
     session_mgr = SessionManager(cookies_file)
-
     bookings = []
 
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent=(
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-            )
-
-            if session_mgr.cookies_exist():
-                logger.info("Meet & Play sessie laden uit cookies...")
-                session_mgr.load_cookies(context)
-
-            page = context.new_page()
-
-            # Controleer of de sessie nog geldig is
-            if not session_mgr.is_logged_in(page):
-                logger.info("Meet & Play sessie verlopen — opnieuw inloggen...")
-                page.close()
-                context.close()
-
-                if not email or not password:
-                    logger.warning("Geen Meet & Play credentials — boekingen overgeslagen")
-                    browser.close()
-                    return []
-
-                context, success = session_mgr.auto_login(browser, email, password)
-                if not success:
-                    logger.warning("Meet & Play inloggen mislukt — boekingen overgeslagen")
-                    browser.close()
-                    return []
-                page = context.new_page()
-
-            logger.info("Meet & Play reserveringen ophalen...")
-            page.goto("https://www.meetandplay.nl/mijn-reserveringen", wait_until="load", timeout=30000)
-            page.wait_for_timeout(2000)
-
-            # Accepteer cookies indien popup verschijnt
             try:
-                cookie_btn = page.locator('button:has-text("Alles toestaan")')
-                if cookie_btn.count() > 0:
-                    cookie_btn.first.click()
-                    page.wait_for_timeout(800)
-            except Exception:
-                pass
-
-            # Wacht op reserveringen of "geen reserveringen" bericht
-            try:
-                page.wait_for_selector(
-                    '.c-reservation-card, .reservation-card, [class*="reservation"], .c-alert',
-                    timeout=10000,
-                )
-            except Exception:
-                pass
-
-            # Scrape reserveringskaarten
-            today_str = datetime.now().strftime("%Y-%m-%d")
-
-            # Probeer meerdere mogelijke selectors voor reserveringskaarten
-            card_selectors = [
-                ".c-reservation-card",
-                ".reservation-card",
-                "[class*='reservation-item']",
-                "[class*='booking-card']",
-                ".mp-reservation",
-            ]
-
-            cards = None
-            for selector in card_selectors:
-                candidate = page.locator(selector)
-                if candidate.count() > 0:
-                    cards = candidate
-                    logger.info("Reserveringskaarten gevonden via selector: %s (%d stuks)", selector, candidate.count())
-                    break
-
-            if not cards or cards.count() == 0:
-                logger.info("Geen reserveringskaarten gevonden op Meet & Play (pagina-inhoud check)")
-                # Probeer via pagina-tekst te zien of er reserveringen zijn
-                page_text = page.inner_text("body")
-                if "geen reservering" in page_text.lower() or "no reservation" in page_text.lower():
-                    logger.info("Meet & Play meldt: geen reserveringen")
+                context = _logged_in_context(browser, session_mgr, email, password)
+                if context:
+                    bookings = _scrape_reservations(context.new_page())
+                    session_mgr.save_cookies(context)
+            finally:
                 browser.close()
-                return []
-
-            today = datetime.now().date()
-
-            for i in range(cards.count()):
-                card = cards.nth(i)
-                try:
-                    card_text = card.inner_text()
-                    logger.debug("Reserveringskaart %d tekst: %s", i, card_text[:200])
-
-                    # Datum ophalen — zoek naar datum-element
-                    date_str = None
-                    for date_sel in [".c-reservation-card__date", ".reservation-date", "[class*='date']", "time"]:
-                        date_el = card.locator(date_sel)
-                        if date_el.count() > 0:
-                            raw = date_el.first.inner_text().strip()
-                            # Parseer "donderdag 3 april 2026" of "03-04-2026" of ISO
-                            date_str = _parse_dutch_date(raw)
-                            if date_str:
-                                break
-                            # Probeer datetime attribuut
-                            dt_attr = date_el.first.get_attribute("datetime")
-                            if dt_attr:
-                                date_str = dt_attr[:10]
-                                break
-
-                    if not date_str:
-                        # Probeer datum uit card_text te halen
-                        import re
-                        date_match = re.search(
-                            r'\b(\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}-\d{2}-\d{2})\b',
-                            card_text
-                        )
-                        if date_match:
-                            date_str = _parse_dutch_date(date_match.group(1))
-
-                    if not date_str:
-                        logger.debug("Geen datum gevonden in kaart %d", i)
-                        continue
-
-                    # Alleen toekomstige boekingen
-                    try:
-                        from datetime import date as date_type
-                        booking_dt = datetime.strptime(date_str, "%Y-%m-%d").date()
-                        if booking_dt < today:
-                            continue
-                    except Exception:
-                        pass
-
-                    # Club naam
-                    club_name = ""
-                    for club_sel in [".c-reservation-card__club", ".club-name", "[class*='club']", "h3", "h4"]:
-                        el = card.locator(club_sel)
-                        if el.count() > 0:
-                            club_name = el.first.inner_text().strip().split("\n")[0]
-                            if club_name:
-                                break
-
-                    # Tijd
-                    time_range = ""
-                    for time_sel in [".c-reservation-card__time", ".reservation-time", "[class*='time']"]:
-                        el = card.locator(time_sel)
-                        if el.count() > 0:
-                            time_range = el.first.inner_text().strip()
-                            if time_range:
-                                break
-
-                    # Court naam
-                    court_name = ""
-                    for court_sel in [".c-reservation-card__court", ".court-name", "[class*='court']", "[class*='field']"]:
-                        el = card.locator(court_sel)
-                        if el.count() > 0:
-                            court_name = el.first.inner_text().strip().split("\n")[0]
-                            if court_name:
-                                break
-
-                    # Betaallink of boekingslink
-                    payment_url = ""
-                    link = card.locator("a[href*='betalen'], a[href*='payment'], a[href*='checkout'], a[href*='reservering']")
-                    if link.count() > 0:
-                        payment_url = link.first.get_attribute("href") or ""
-                        if payment_url and not payment_url.startswith("http"):
-                            payment_url = f"https://www.meetandplay.nl{payment_url}"
-
-                    bookings.append({
-                        "booked_date": date_str,
-                        "provider": "meetandplay",
-                        "club_name": club_name or "Meet & Play",
-                        "club_address": "",
-                        "court_name": court_name or "Padelbaan",
-                        "time_range": time_range,
-                        "payment_url": payment_url,
-                        "status": "confirmed",
-                    })
-                    logger.info("Reservering gevonden: %s op %s om %s", club_name, date_str, time_range)
-
-                except Exception as e:
-                    logger.debug("Fout bij verwerken reserveringskaart %d: %s", i, e)
-
-            session_mgr.save_cookies(context)
-            browser.close()
-
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — ophalen is best-effort
         logger.warning("Fout bij ophalen Meet & Play boekingen: %s", e)
 
     logger.info("%d Meet & Play boeking(en) gevonden", len(bookings))
@@ -416,16 +292,6 @@ def fetch_meetandplay_bookings(email: str, password: str, cookies_file: str) -> 
 
 def _parse_dutch_date(raw: str) -> str:
     """Converteert diverse datumformaten naar YYYY-MM-DD."""
-    import re
-
-    MONTHS = {
-        "januari": 1, "februari": 2, "maart": 3, "april": 4,
-        "mei": 5, "juni": 6, "juli": 7, "augustus": 8,
-        "september": 9, "oktober": 10, "november": 11, "december": 12,
-        "jan": 1, "feb": 2, "mrt": 3, "apr": 4, "jun": 6,
-        "jul": 7, "aug": 8, "sep": 9, "okt": 10, "nov": 11, "dec": 12,
-    }
-
     raw = raw.strip().lower()
 
     # ISO formaat: 2026-04-03
@@ -440,13 +306,8 @@ def _parse_dutch_date(raw: str) -> str:
 
     # "donderdag 3 april 2026" of "3 april 2026"
     m = re.search(r"(\d{1,2})\s+(\w+)\s+(\d{4})", raw)
-    if m:
-        day = int(m.group(1))
-        month_name = m.group(2).lower()
-        year = int(m.group(3))
-        month = MONTHS.get(month_name)
-        if month:
-            return f"{year}-{month:02d}-{day:02d}"
+    if m and m.group(2) in DUTCH_MONTHS:
+        return f"{int(m.group(3))}-{DUTCH_MONTHS[m.group(2)]:02d}-{int(m.group(1)):02d}"
 
     return ""
 
@@ -477,38 +338,21 @@ def main() -> None:
         print("[]")
         sys.exit(1)
 
-    providers_config = config.get("providers", {})
+    fetchers = {
+        "meetandplay": fetch_meetandplay_bookings,
+        "playtomic": fetch_playtomic_bookings,
+    }
     all_bookings = []
-
-    # Meet & Play
-    map_config = providers_config.get("meetandplay", {})
-    if map_config.get("enabled", True):
-        email = os.getenv("KNLTB_EMAIL", "")
-        password = os.getenv("KNLTB_PASSWORD", "")
-        cookies_file = map_config.get("cookies_file", ".meetandplay_cookies.json")
-        if email:
-            try:
-                mnp_bookings = fetch_meetandplay_bookings(email, password, cookies_file)
-                all_bookings.extend(mnp_bookings)
-            except Exception as e:
-                logger.warning("Meet & Play ophalen mislukt: %s", e)
-        else:
-            logger.info("KNLTB_EMAIL niet geconfigureerd — Meet & Play overgeslagen")
-
-    # Playtomic
-    pt_config = providers_config.get("playtomic", {})
-    if pt_config.get("enabled", False):
-        email = os.getenv("PLAYTOMIC_EMAIL", "")
-        password = os.getenv("PLAYTOMIC_PASSWORD", "")
-        token_cache = pt_config.get("token_cache_file", ".playtomic_token.json")
-        if email:
-            try:
-                pt_bookings = fetch_playtomic_bookings(email, password, token_cache)
-                all_bookings.extend(pt_bookings)
-            except Exception as e:
-                logger.warning("Playtomic ophalen mislukt: %s", e)
-        else:
-            logger.info("PLAYTOMIC_EMAIL niet geconfigureerd — Playtomic overgeslagen")
+    for spec, credentials, provider_cfg in enabled_providers(config):
+        if not credentials["email"]:
+            logger.info("%s niet geconfigureerd — %s overgeslagen", spec.email_env, spec.name)
+            continue
+        try:
+            all_bookings.extend(fetchers[spec.name](
+                credentials["email"], credentials["password"], provider_cfg[spec.session_file_key],
+            ))
+        except Exception as e:  # noqa: BLE001 — één provider mag de andere niet blokkeren
+            logger.warning("%s ophalen mislukt: %s", spec.name, e)
 
     # Sorteer op datum
     all_bookings.sort(key=lambda b: b.get("booked_date", ""))
@@ -518,7 +362,7 @@ def main() -> None:
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(output_json)
         logger.info("%d boeking(en) geschreven naar %s", len(all_bookings), args.output)
     else:

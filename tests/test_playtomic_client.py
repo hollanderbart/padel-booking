@@ -4,7 +4,6 @@ Unit tests voor providers/playtomic/client.py.
 
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -381,3 +380,42 @@ class TestConfirmBooking:
         url = mock_post.call_args[0][0]
         assert "intent-XYZ" in url
         assert "confirmation" in url
+
+
+# ---------------------------------------------------------------------------
+# get_upcoming_matches + timeouts
+# ---------------------------------------------------------------------------
+
+class TestGetUpcomingMatches:
+    def _authed_client(self, tmp_path):
+        client = _make_client(tmp_path)
+        client._user_id = "u1"
+        return client
+
+    def test_gepagineerde_response(self, tmp_path):
+        client = self._authed_client(tmp_path)
+        resp = _mock_response(json_data={"content": [{"match_id": "m1"}]})
+        with patch.object(client, "_ensure_authenticated"), \
+             patch.object(client._session, "get", return_value=resp) as mock_get:
+            assert client.get_upcoming_matches() == [{"match_id": "m1"}]
+        assert mock_get.call_args[1]["params"]["user_id"] == "u1"
+
+    def test_kale_lijst_response(self, tmp_path):
+        client = self._authed_client(tmp_path)
+        resp = _mock_response()
+        resp.json.return_value = [{"match_id": "m1"}]
+        with patch.object(client, "_ensure_authenticated"), \
+             patch.object(client._session, "get", return_value=resp):
+            assert client.get_upcoming_matches() == [{"match_id": "m1"}]
+
+    def test_zonder_user_id_lege_lijst(self, tmp_path):
+        client = _make_client(tmp_path)
+        with patch.object(client, "_ensure_authenticated"):
+            assert client.get_upcoming_matches() == []
+
+    def test_requests_hebben_timeout(self, tmp_path):
+        client = self._authed_client(tmp_path)
+        with patch.object(client, "_ensure_authenticated"), \
+             patch.object(client._session, "get", return_value=_mock_response(json_data=[])) as mock_get:
+            client.search_clubs(52.0, 4.0)
+        assert mock_get.call_args[1]["timeout"] > 0

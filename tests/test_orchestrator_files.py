@@ -2,14 +2,12 @@
 Unit tests voor Padel Booking Orchestrator — geen browser of credentials nodig.
 
 Uitvoeren:
-  pytest test_unit.py -v
+  pytest tests/test_orchestrator_files.py -v
 """
 
 import json
 from datetime import datetime
-from pathlib import Path
 
-import pytest
 
 from orchestrator import (
     append_booking_history,

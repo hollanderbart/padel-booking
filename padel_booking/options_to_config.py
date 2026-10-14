@@ -1,11 +1,11 @@
 import json
 import yaml
 
-with open("/data/options.json") as f:
+with open("/data/options.json", encoding="utf-8") as f:
     opts = json.load(f)
 
 # Schrijf .env
-with open("/app/.env", "w") as f:
+with open("/app/.env", "w", encoding="utf-8") as f:
     f.write(f"KNLTB_EMAIL={opts['knltb_email']}\n")
     f.write(f"KNLTB_PASSWORD={opts['knltb_password']}\n")
     if opts.get("ha_notify_device_id"):
@@ -54,7 +54,7 @@ config = {
     },
 }
 
-with open("/app/config.yaml", "w") as f:
+with open("/app/config.yaml", "w", encoding="utf-8") as f:
     yaml.dump(config, f, allow_unicode=True)
 
 print(f"Config geladen: {opts['location_city']}, {opts['booking_day']} {opts['booking_time_start']}–{opts['booking_time_end']}")
