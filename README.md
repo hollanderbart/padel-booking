@@ -409,7 +409,14 @@ Slot 5 overgeslagen: duur 60 min ≠ gewenste 90 min (tijd: 19:30, label: '')
 Slot 7 overgeslagen: buitenbaan ('Buitenbaan dubbelspel')
 ```
 
+Sinds v2.3.4 logt de booker per club ook welke starttijden beschikbaar zijn en welke binnen het venster vallen:
+
+```
+Beschikbare starttijden bij Sportcentrum midden Boskoop: 18:00, 19:30, 21:00 — binnen venster: 19:30
+```
+
 Mogelijke oorzaken:
+- **Versie ouder dan v2.3.4**: Meet & Play toont per keer alleen de slots van één starttijd; oudere versies keken alleen naar de eerste tijd
 - **Tijdvenster te smal**: het slot valt net buiten `booking_time_start`–`booking_time_end`
 - **Duur mismatch**: de site toont bijv. "60 min" maar `duration_minutes` staat op `90`
 - **Buitenbaan filter**: het label van het slot bevat "buiten" terwijl `court_type=indoor`

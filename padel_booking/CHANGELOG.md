@@ -1,3 +1,10 @@
+## 2.3.4
+
+- Fix (Meet & Play): de clubpagina toont alleen slots van de geselecteerde starttijd. De booker bekeek daardoor alleen de eerste beschikbare tijd (bijv. 18:00) en vond niets binnen het venster (bijv. 19:30–21:00), ook als dat wel vrij was. De booker loopt nu alle starttijden binnen het venster af via de "Tijdstip"-kiezer
+- Fix (Meet & Play): het duurfilter is een knop geworden ("90 minuten") i.p.v. een dropdown en werd stil overgeslagen; beide varianten worden nu ondersteund
+- Fix (Meet & Play): "Toevoegen" klikte de eerste knop op de pagina (mogelijk een andere baan dan in de notificatie); nu wordt de knop van het gekozen slot gebruikt
+- Het dagdeelfilter staat niet meer vast op "Avond"; de booker filtert zelf op het tijdvenster (werkt nu ook voor vensters vóór 18:00)
+
 ## 2.3.3
 
 - Fix (booking research): starttijden worden nu uit de "Tijdstip"-kiezer op de clubpagina gelezen. Die bevat alle nog beschikbare starttijden van een dag; de slotlijst toont alleen de eerste tijd
