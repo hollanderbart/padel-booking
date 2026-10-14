@@ -105,6 +105,7 @@ def summarize_scan(observed_at: datetime, day_slots: dict[int, list[str]]) -> di
         "horizon_date": None,
         "first_slot": None,
         "last_slot": None,
+        "distinct_start_times": 0,
     }
     if not days_with_slots:
         return summary
@@ -116,6 +117,7 @@ def summarize_scan(observed_at: datetime, day_slots: dict[int, list[str]]) -> di
         "horizon_date": (observed_at.date() + timedelta(days=horizon)).isoformat(),
         "first_slot": _hhmm(starts[0]),
         "last_slot": _hhmm(starts[-1]),
+        "distinct_start_times": len(set(starts)),
     })
     return summary
 
@@ -128,9 +130,10 @@ def classify_observation(obs: dict) -> str | None:
     """
     "cutoff"   — op de horizon-dag stoppen de slots rond het observatietijdstip (→ rollend)
     "full_day" — de horizon-dag staat ook ná het observatietijdstip open (→ hele dag tegelijk)
-    None       — niet informatief (buiten speeluren of geen slots)
+    None       — niet informatief (buiten speeluren, geen slots, of de pagina toonde maar
+                 één starttijd zodat het verloop over de dag niet te zien is)
     """
-    if obs.get("last_slot") is None:
+    if obs.get("last_slot") is None or obs.get("distinct_start_times", 0) < 2:
         return None
     observed = datetime.fromisoformat(obs["observed_at"])
     if observed.hour not in INFORMATIVE_HOURS:
@@ -302,7 +305,23 @@ def render_report(rows: list[dict], now: datetime) -> str:
 # Browser: clubs vinden en scannen
 # ---------------------------------------------------------------------------
 
-def _probe_club(page, booker, club: dict, observed_at: datetime) -> dict:
+def _save_snapshot(page, snapshot_dir: Path | None, name: str) -> None:
+    """Bewaar de pagina-HTML en de filteropties (diagnose van de paginastructuur)."""
+    if snapshot_dir is None:
+        return
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(Exception):
+        (snapshot_dir / f"{name}.html").write_text(page.content(), encoding="utf-8")
+        selects = page.evaluate(
+            """() => [...document.querySelectorAll('select')].map(s => ({
+                id: s.id, name: s.name, value: s.value,
+                options: [...s.options].map(o => [o.value, o.text.trim()]),
+            }))"""
+        )
+        (snapshot_dir / f"{name}.selects.json").write_text(json.dumps(selects, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _probe_club(page, booker, club: dict, observed_at: datetime, snapshot_dir: Path | None = None) -> dict:
     page.goto(club["url"], wait_until="load", timeout=60000)
     page.wait_for_timeout(1500)
     booker._accept_cookies(page)
@@ -320,10 +339,17 @@ def _probe_club(page, booker, club: dict, observed_at: datetime) -> dict:
         texts = page.locator(".timeslot-container a.timeslot .timeslot-time").all_inner_texts()
         return [m.group(0) for t in texts if (m := TIME_RE.search(t))]
 
-    return summarize_scan(observed_at, scan_days(probe_day))
+    summary = summarize_scan(observed_at, scan_days(probe_day))
+    if snapshot_dir is not None:
+        slug = re.sub(r"\W+", "_", club["name"]).strip("_").lower()
+        for label, offset in (("dag0", 0), ("horizon", summary["horizon_days"])):
+            if offset is not None:
+                probe_day(offset)
+                _save_snapshot(page, snapshot_dir, f"{slug}_{label}")
+    return summary
 
 
-def observe_clubs(config: dict, max_clubs: int | None = None) -> list[dict]:
+def observe_clubs(config: dict, max_clubs: int | None = None, snapshot_dir: Path | None = None) -> list[dict]:
     from playwright.sync_api import sync_playwright
 
     from providers.meetandplay.booking import MeetAndPlayBooker
@@ -342,7 +368,7 @@ def observe_clubs(config: dict, max_clubs: int | None = None) -> list[dict]:
                 observed_at = datetime.now(TZ)
                 record = {"club_name": club["name"], "club_address": club["address"], "club_url": club["url"]}
                 try:
-                    record.update(_probe_club(page, booker, club, observed_at))
+                    record.update(_probe_club(page, booker, club, observed_at, snapshot_dir))
                     logger.info("%s: horizon %s dagen (laatste slot %s)", club["name"], record["horizon_days"], record["last_slot"])
                 except Exception as e:  # noqa: BLE001 — één club mag het onderzoek niet stoppen
                     logger.warning("%s: scan mislukt: %s", club["name"], e)
@@ -360,6 +386,8 @@ def main() -> None:
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--max-clubs", type=int, default=None)
     parser.add_argument("--report-only", action="store_true", help="Alleen rapport opnieuw genereren")
+    parser.add_argument("--snapshot-dir", type=Path, default=None,
+                        help="Bewaar per club de HTML en filteropties van dag 0 en de horizon-dag (diagnose)")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
     setup_logging(args.debug)
@@ -370,7 +398,7 @@ def main() -> None:
     observations = load_observations(obs_path)
 
     if not args.report_only:
-        new = observe_clubs(load_config(args.config), args.max_clubs)
+        new = observe_clubs(load_config(args.config), args.max_clubs, args.snapshot_dir)
         if not new or all(o.get("error") for o in new):
             logger.error("Geen enkele club succesvol gescand — observaties niet opgeslagen")
             sys.exit(1)
