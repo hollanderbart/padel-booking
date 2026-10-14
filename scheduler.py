@@ -104,18 +104,24 @@ def plan_runs(schedule: dict, booking_cfg: dict, since: datetime, until: datetim
     Alle runs met `since < at <= until`, gesorteerd. Gerichte runs op hetzelfde moment
     worden samengevoegd; daarnaast altijd de nachtelijke volledige run.
     """
-    targets = [
-        d.date() for d in upcoming_booking_dates(
-            booking_cfg["day"], booking_cfg["time_start"], booking_cfg.get("weeks_ahead", 4), now=since,
-        )
-    ]
+    def targets_at(moment: datetime, extra_weeks: int = 0) -> list[date]:
+        return [
+            d.date() for d in upcoming_booking_dates(
+                booking_cfg["day"], booking_cfg["time_start"],
+                booking_cfg.get("weeks_ahead", 4) + extra_weeks, now=moment,
+            )
+        ]
+
+    # Doeldagen die vóór `until` binnen het zoekbereik (weeks_ahead) komen; per vrijgavemoment
+    # wordt gecontroleerd of de doeldag op dát moment binnen het bereik valt.
+    candidates = targets_at(since, extra_weeks=(until - since).days // 7 + 1)
 
     grouped: dict[datetime, dict] = {}
     for club in schedule.get("clubs", []):
-        for target_date in targets:
+        for target_date in candidates:
             for moment in release_moments(club, target_date, booking_cfg):
                 at = moment + RELEASE_DELAY
-                if since < at <= until:
+                if since < at <= until and target_date in targets_at(at):
                     group = grouped.setdefault(at, {"dates": set(), "clubs": set(), "reasons": set()})
                     group["dates"].add(target_date.isoformat())
                     group["clubs"].add((club["club_name"], club["club_url"], club.get("club_address", "")))

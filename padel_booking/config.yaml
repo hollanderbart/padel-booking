@@ -1,5 +1,5 @@
 name: "Padel Booking"
-version: "2.4.0"
+version: "2.4.1"
 slug: "padel_booking"
 description: "Automatisch padelbanen boeken op meetandplay.nl en Playtomic"
 arch:
@@ -26,7 +26,7 @@ options:
   duration_minutes: "90"
   court_type: "indoor"
   game_type: "double"
-  weeks_ahead: 4
+  weeks_ahead: 5
   meetandplay_enabled: true
   playtomic_enabled: false
   fetch_bookings_enabled: true

@@ -1,3 +1,8 @@
+## 2.4.1
+
+- Standaard `weeks_ahead` van 4 naar 5, zodat clubs met een boekingsvenster van ~30 dagen (Tennis en Padel Meerzicht, TERWEGEN INDOOR) op hun vrijgavemoment geboekt worden. Bestaande installaties: pas de optie aan in de addon-configuratie in HA
+- Fix (scheduler): doeldagen die pas later binnen `weeks_ahead` vallen werden niet vooruit gepland (zichtbaar in `scheduler.py --plan`); per vrijgavemoment wordt nu gecontroleerd of de doeldag dan binnen bereik valt
+
 ## 2.4.0
 
 - Feature: slimme planning (`schedule_mode: smart`, standaard). De addon draait nu continu en start de booker op het moment dat een club nieuwe banen vrijgeeft, op basis van het club-schema uit de booking research (`club_schedule.json` op de branch `booking-research`):
