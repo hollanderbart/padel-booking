@@ -322,6 +322,14 @@ class TestEnabledProviders:
         assert [spec.name for spec, _, _ in result] == ["meetandplay"]
         assert "tijdelijk uitgeschakeld" in caplog.text
 
+    def test_playtomic_uit_in_config_geeft_geen_waarschuwing(self, caplog):
+        config = {"providers": {"playtomic": {"enabled": False}}}
+        with caplog.at_level("INFO"):
+            result = enabled_providers(config)
+        assert [spec.name for spec, _, _ in result] == ["meetandplay"]
+        assert "tijdelijk uitgeschakeld" not in caplog.text
+        assert "Provider 'playtomic' uitgeschakeld" in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # Gerichte runs (scheduler)
