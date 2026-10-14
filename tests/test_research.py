@@ -7,6 +7,7 @@ from datetime import date, datetime, time, timedelta
 import pytest
 
 from research.booking_windows import (
+    build_schedule,
     BLOCK,
     DAILY,
     INSUFFICIENT,
@@ -134,6 +135,7 @@ class TestInferStrategy:
         result = infer_strategy(_observations(DAILY, window=14, hour=hour))
         assert result["strategy"] == DAILY
         assert result["window_days"] == 14
+        assert hour in result["release_hours"]
         assert f"{hour:02d}:00" in result["release"]
 
     def test_dagelijks_om_middernacht_exact(self):
@@ -182,3 +184,14 @@ class TestStorageAndReport:
         now = datetime(2026, 4, 9, 16, tzinfo=TZ)
         failed = {"club_name": "X", "club_address": "", "club_url": "x", "observed_at": now.isoformat(), "error": "boom"}
         assert infer_all([failed], now) == []
+
+
+class TestBuildSchedule:
+    def test_bevat_strategie_venster_en_uren(self):
+        now = datetime.combine(date(2026, 4, 13), time(12), tzinfo=TZ)
+        rows = infer_all(_observations(DAILY, window=14, hour=0), now)
+        club = build_schedule(rows, now)["clubs"][0]
+        assert club == {
+            "club_url": "u", "club_name": "C", "club_address": "A",
+            "strategy": DAILY, "window_days": 14, "release_hours": [0],
+        }

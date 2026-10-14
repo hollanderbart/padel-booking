@@ -1,3 +1,15 @@
+## 2.4.0
+
+- Feature: slimme planning (`schedule_mode: smart`, standaard). De addon draait nu continu en start de booker op het moment dat een club nieuwe banen vrijgeeft, op basis van het club-schema uit de booking research (`club_schedule.json` op de branch `booking-research`):
+  - rollende clubs: N dagen vóór de doeldag, op elke starttijd binnen het tijdvenster (bijv. 19:30, 20:00, 20:30)
+  - dagelijkse clubs: N dagen vóór de doeldag op het vrijgave-uur
+  - gerichte runs gaan direct naar de club (geen zoekpagina) en worden na 1 en 5 minuten herhaald als er nog niets vrij was
+  - de volledige run om 00:01 blijft als vangnet voor clubs zonder bekend vrijgavemoment
+- `schedule_mode: nightly` behoudt het oude gedrag (één run per start van de addon)
+- Nieuwe CLI-optie `orchestrator.py --target '<json>'` voor een gerichte run (datums + clubs); `scheduler.py --plan` toont de geplande runs
+- Fix: `run.sh` brak af als er geen boeking gemaakt werd (exit code 1 met `set -e`), waardoor toekomstige boekingen niet opgehaald en sessiebestanden niet bewaard werden
+- Sessiebestanden staan nu direct in `/config/padel/` (eenmalige migratie vanuit `/data`)
+
 ## 2.3.4
 
 - Fix (Meet & Play): de clubpagina toont alleen slots van de geselecteerde starttijd. De booker bekeek daardoor alleen de eerste beschikbare tijd (bijv. 18:00) en vond niets binnen het venster (bijv. 19:30–21:00), ook als dat wel vrij was. De booker loopt nu alle starttijden binnen het venster af via de "Tijdstip"-kiezer

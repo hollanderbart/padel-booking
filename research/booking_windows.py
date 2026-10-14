@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 TZ = ZoneInfo("Europe/Amsterdam")
 OBSERVATIONS_FILE = "observations.jsonl"
 REPORT_FILE = "BOOKING_WINDOWS.md"
+SCHEDULE_FILE = "club_schedule.json"   # machine-leesbaar; gebruikt door scheduler.py in de addon
 
 MAX_DAYS = 35                    # verder kijken heeft geen zin
 STOP_AFTER_EMPTY_DAYS = 4        # zoveel lege dagen na de laatste dag met slots → horizon gevonden
@@ -179,7 +180,7 @@ def _hour_range_label(hours: list[int]) -> str:
 def infer_strategy(observations: list[dict]) -> dict:
     """Leid de release-strategie van één club af uit diens observaties."""
     seen = [o for o in observations if o.get("horizon_days") is not None]
-    base = {"observations": len(observations), "window_days": None, "release": "", "advice": ""}
+    base = {"observations": len(observations), "window_days": None, "release_hours": [], "release": "", "advice": ""}
     if not observations:
         return {**base, "strategy": INSUFFICIENT}
     if not seen:
@@ -218,6 +219,7 @@ def infer_strategy(observations: list[dict]) -> dict:
     return {
         **base,
         "window_days": window,
+        "release_hours": hours,
         "strategy": DAILY,
         "release": f"dagelijks {_hour_range_label(hours)}, {window} dagen vooruit",
         "advice": f"Start de booker dagelijks {_hour_range_label(hours)} en zoek {window} dagen vooruit.",
@@ -262,6 +264,24 @@ def infer_all(observations: list[dict], now: datetime) -> list[dict]:
         })
     order = {ROLLING: 0, DAILY: 1, BLOCK: 2, INSUFFICIENT: 3, NONE_SEEN: 4}
     return sorted(rows, key=lambda r: (order[r["strategy"]], r["club_name"]))
+
+
+def build_schedule(rows: list[dict], now: datetime) -> dict:
+    """Machine-leesbare samenvatting voor scheduler.py: per club strategie, venster en vrijgave-uren."""
+    return {
+        "generated_at": now.isoformat(timespec="minutes"),
+        "clubs": [
+            {
+                "club_url": r["club_url"],
+                "club_name": r["club_name"],
+                "club_address": r["club_address"],
+                "strategy": r["strategy"],
+                "window_days": r["window_days"],
+                "release_hours": r["release_hours"],
+            }
+            for r in rows
+        ],
+    }
 
 
 def render_report(rows: list[dict], now: datetime) -> str:
@@ -408,7 +428,9 @@ def main() -> None:
 
     now = datetime.now(TZ)
     save_observations(obs_path, observations, now)
-    (data_dir / REPORT_FILE).write_text(render_report(infer_all(observations, now), now), encoding="utf-8")
+    rows = infer_all(observations, now)
+    (data_dir / REPORT_FILE).write_text(render_report(rows, now), encoding="utf-8")
+    (data_dir / SCHEDULE_FILE).write_text(json.dumps(build_schedule(rows, now), indent=2, ensure_ascii=False), encoding="utf-8")
     logger.info("Rapport geschreven naar %s", data_dir / REPORT_FILE)
 
 

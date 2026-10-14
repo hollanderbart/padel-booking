@@ -26,6 +26,7 @@ Gebruik [semantic versioning](https://semver.org/):
    - `orchestrator.py` → `padel_booking/orchestrator.py`
    - `notify.py` → `padel_booking/notify.py`
    - `fetch_bookings.py` → `padel_booking/fetch_bookings.py`
+   - `scheduler.py` → `padel_booking/scheduler.py`
    - `providers/` → `padel_booking/providers/`
 3. Verhoog het versienummer in `padel_booking/config.yaml`
 4. **Voeg een entry toe aan `padel_booking/CHANGELOG.md`** met het nieuwe versienummer en een beknopte beschrijving van de wijzigingen (nieuwste versie bovenaan)
@@ -58,13 +59,14 @@ padel-booking/
 ├── padel_booking/                   # HA addon (slug = directory naam)
 │   ├── config.yaml                  # addon manifest + versienummer
 │   ├── Dockerfile                   # Python 3.12 + Playwright + Chromium
-│   ├── run.sh                       # entrypoint: sync config, run orchestrator.py
+│   ├── run.sh                       # entrypoint: sync config, start scheduler.py (smart) of orchestrator.py (nightly)
 │   ├── options_to_config.py         # converteert /data/options.json naar config
 │   ├── requirements.txt             # Python dependencies
 │   ├── booking_config.yaml          # standaard booking configuratie
 │   └── CHANGELOG.md
 ├── orchestrator.py                  # hoofdscript — coördineert providers
 ├── fetch_bookings.py                # haalt toekomstige boekingen op
+├── scheduler.py                     # plant runs op de vrijgavemomenten per club (schedule_mode: smart)
 ├── notify.py                        # notificaties (HA push + macOS + console)
 ├── providers/
 │   ├── base.py                      # ProviderResult contract + gedeelde datum/tijd-helpers
@@ -99,6 +101,7 @@ Sessiepersistentie draait via `/config/padel/` (volume map `config:rw`):
 ```
 /config/padel/.meetandplay_cookies.json   # Meet & Play sessie cookies
 /config/padel/.playtomic_token.json       # Playtomic JWT token cache
+/config/padel/club_schedule.json          # club-schema (cache, uit de booking-research branch)
 /config/padel/booking_history.json        # boekingsgeschiedenis
 /config/padel/last_run.json               # laatste run status
 ```

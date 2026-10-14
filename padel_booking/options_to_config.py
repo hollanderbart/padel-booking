@@ -35,17 +35,23 @@ config = {
     "providers": {
         "meetandplay": {
             "enabled": opts.get("meetandplay_enabled", True),
-            "cookies_file": "/data/.meetandplay_cookies.json",
+            "cookies_file": "/config/padel/.meetandplay_cookies.json",
         },
         "playtomic": {
             "enabled": opts.get("playtomic_enabled", False),
-            "token_cache_file": "/data/.playtomic_token.json",
+            "token_cache_file": "/config/padel/.playtomic_token.json",
         },
     },
     "fetch_bookings": {
         "enabled": opts.get("fetch_bookings_enabled", True),
         "output_file": "/config/padel/future_bookings.json",
         "skip_booked_dates": opts.get("skip_booked_dates", True),
+    },
+    "schedule": {
+        # smart: draai continu en boek op de vrijgavemomenten per club; nightly: één run per start
+        "mode": opts.get("schedule_mode", "smart"),
+        "url": "https://raw.githubusercontent.com/hollanderbart/padel-booking/booking-research/club_schedule.json",
+        "cache_file": "/config/padel/club_schedule.json",
     },
     "state": {
         "booking_state_file": "/config/padel/.booking_state.json",

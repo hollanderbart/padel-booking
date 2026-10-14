@@ -67,6 +67,13 @@ class MeetAndPlayBooker:
     def _get_upcoming_booking_dates(self, count: int = 3) -> list[datetime]:
         return upcoming_booking_dates(self._booking["day"], self._booking["time_start"], count)
 
+    def _candidate_dates(self) -> list[datetime]:
+        """Op te zoeken datums: de opgegeven datums bij een gerichte run, anders de komende weken."""
+        only_dates = self._booking.get("only_dates")
+        if only_dates:
+            return [datetime.fromisoformat(d) for d in only_dates]
+        return self._get_upcoming_booking_dates(count=self._booking.get("weeks_ahead", 4))
+
     # ------------------------------------------------------------------
     # Browser setup
     # ------------------------------------------------------------------
@@ -495,10 +502,7 @@ class MeetAndPlayBooker:
         logger.info("Meet & Play provider gestart")
         logger.info("=" * 60)
 
-        booking_dates = without_skip_dates(
-            self._get_upcoming_booking_dates(count=self._booking.get("weeks_ahead", 4)),
-            self._booking.get("skip_dates", []),
-        )
+        booking_dates = without_skip_dates(self._candidate_dates(), self._booking.get("skip_dates", []))
 
         logger.info(
             "Zoeken naar tijdsloten voor de komende %d %s-avonden (%s–%s):",
@@ -522,7 +526,8 @@ class MeetAndPlayBooker:
                 context = self._ensure_logged_in(browser, self.session_manager.new_context(browser))
                 page = context.new_page()
 
-                clubs = self._search_clubs(page)
+                # Gerichte run (scheduler): direct naar de opgegeven clubs, zonder zoekpagina
+                clubs = self._booking.get("clubs") or self._search_clubs(page)
                 if not clubs:
                     logger.warning("Geen clubs gevonden met de opgegeven filters")
                     return _failure("Geen clubs gevonden")

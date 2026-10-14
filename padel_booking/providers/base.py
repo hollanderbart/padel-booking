@@ -65,7 +65,9 @@ def hhmm_to_minutes(value: str) -> int:
     return int(hours) * 60 + int(minutes)
 
 
-def upcoming_booking_dates(day: str, time_start: str = "00:00", count: int = 3) -> list[datetime]:
+def upcoming_booking_dates(
+    day: str, time_start: str = "00:00", count: int = 3, now: datetime | None = None,
+) -> list[datetime]:
     """
     Geef de eerstvolgende `count` datums op weekdag `day`.
 
@@ -76,7 +78,7 @@ def upcoming_booking_dates(day: str, time_start: str = "00:00", count: int = 3) 
     if target_weekday is None:
         raise ValueError(f"Ongeldige dag in config: {day.lower()}")
 
-    now = datetime.now()
+    now = now or datetime.now()
     days_ahead = (target_weekday - now.weekday()) % 7
     if days_ahead == 0:
         start = hhmm_to_minutes(time_start)

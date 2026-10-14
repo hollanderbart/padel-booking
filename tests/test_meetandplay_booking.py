@@ -670,3 +670,28 @@ class TestSelectDuration:
         page, pill = self._page("badge rounded-pill pill active")
         MeetAndPlayBooker._select_duration(page, 90)
         pill.first.click.assert_not_called()
+
+
+class TestGerichteRun:
+    def test_opgegeven_datums_worden_gebruikt(self):
+        req = _make_request()
+        req["booking_request"]["only_dates"] = ["2026-10-22"]
+        booker = _make_booker(req)
+        assert [d.date().isoformat() for d in booker._candidate_dates()] == ["2026-10-22"]
+
+    def test_opgegeven_clubs_slaan_zoekpagina_over(self):
+        req = _make_request(weeks_ahead=1)
+        req["booking_request"]["clubs"] = [{"name": "Club A", "url": "http://x", "address": "Straat"}]
+        booker = _make_booker(req)
+        mock_pw = MagicMock()
+        mock_pw.__enter__ = MagicMock(return_value=mock_pw)
+        mock_pw.__exit__ = MagicMock(return_value=False)
+        booker.session_manager.is_logged_in.return_value = True
+
+        with patch("providers.meetandplay.booking.sync_playwright", return_value=mock_pw), \
+             patch.object(booker, "_search_clubs") as search, \
+             patch.object(booker, "_find_timeslot", return_value=None) as find:
+            booker.run()
+
+        search.assert_not_called()
+        assert find.call_args[0][1]["name"] == "Club A"

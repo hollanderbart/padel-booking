@@ -62,6 +62,7 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 | `game_type` | Speltype: `double` (4 spelers) of `single` (2 spelers) |
 | `weeks_ahead` | Aantal weken vooruit zoeken |
 | `meetandplay_enabled` | Meet & Play provider in/uitschakelen (standaard `true`) |
+| `schedule_mode` | `smart` (standaard): addon draait continu en boekt op het vrijgavemoment per club. `nightly`: één run per start van de addon (oude gedrag) |
 | `playtomic_enabled` | Playtomic provider in/uitschakelen (standaard `false`). **Tijdelijk genegeerd** — Playtomic staat uit sinds v2.3.1, zie Troubleshooting |
 | `fetch_bookings_enabled` | Toekomstige boekingen ophalen en opslaan naar `/config/padel/future_bookings.json` (standaard `true`) |
 | `skip_booked_dates` | Sla datums over die al voorkomen in `future_bookings.json` voordat er gezocht wordt (standaard `true`) |
@@ -92,7 +93,13 @@ INFO  HA push notificatie verzonden: Padelbaan beschikbaar!
 
 ### Stap 5 — Automatisering instellen
 
-Voeg een automation toe via **Settings → Automations → + Create automation**:
+**`schedule_mode: smart` (standaard)**: de addon blijft draaien en plant zelf de runs (zie
+[Wanneer komen banen vrij?](#wanneer-komen-banen-vrij-booking-research)). Een automation is niet nodig,
+maar wel handig als vangnet: als de addon gestopt is, start de automation hem weer. Is hij al
+actief, dan doet `addon_start` niets.
+
+**`schedule_mode: nightly`**: de addon doet één run per start. Voeg dan een automation toe via
+**Settings → Automations → + Create automation**:
 
 - **Trigger**: Time → `00:00:30`
 - **Action**: Call service → `hassio.addon_start` → `addon: local_padel_booking`
@@ -295,6 +302,28 @@ en in de samenvatting van elke workflow-run.
   wordt per club de pagina-HTML als artifact bewaard (handig als Meet & Play de pagina wijzigt).
 - Lokaal: `python -m research.booking_windows --data-dir research-data --max-clubs 3`.
 
+### Boeken op het vrijgavemoment (`schedule_mode: smart`)
+
+`scheduler.py` haalt elke 6 uur `club_schedule.json` op van de `booking-research` branch (met een
+cache in `/config/padel/club_schedule.json`) en plant voor elke doeldag binnen `weeks_ahead`:
+
+- **rollende clubs**: een run N dagen vóór de doeldag op elke starttijd binnen het tijdvenster
+  (bijv. 19:30, 20:00 en 20:30)
+- **dagelijkse clubs**: een run N dagen vóór de doeldag op het vrijgave-uur
+- **altijd**: een volledige run om 00:01 (alle clubs, alle datums) als vangnet, en bij het starten van de addon
+
+Een gerichte run gaat direct naar de clubpagina (geen zoekpagina) en wordt na 1 en 5 minuten herhaald
+als er nog niets vrij was. Clubs met strategie "onvoldoende data" of "blok" worden alleen door de
+nachtelijke run gedekt. Let op: een club met een venster groter dan `weeks_ahead` weken (bijv. 30 dagen
+bij `weeks_ahead: 4`) geeft zijn banen vrij vóórdat de doeldag binnen het zoekbereik valt.
+
+Bekijk de geplande runs:
+
+```bash
+python scheduler.py --plan                                  # met het schema van GitHub
+python scheduler.py --plan --schedule-file club_schedule.json
+```
+
 ## Push notificaties
 
 Bij een beschikbaar slot ontvang je een push notificatie ("Padelbaan beschikbaar!") met:
@@ -326,6 +355,9 @@ python orchestrator.py --debug
 # Dry-run: zoekt slots maar boekt niet echt
 python orchestrator.py --dry-run
 
+# Gerichte run: alleen deze datum(s) bij deze club(s), zonder zoekpagina
+python orchestrator.py --dry-run --target '{"dates": ["2026-10-22"], "clubs": [{"name": "Sportcentrum midden Boskoop", "url": "https://meetandplay.nl/club/88093", "address": "Sportlaan 1, Boskoop"}]}'
+
 # Individuele provider testen
 echo '{"booking_request":{"location":{"city":"Boskoop","radius_km":20},"day":"thursday","time_start":"19:30","time_end":"21:00","duration_minutes":90,"court_type":"indoor","game_type":"double","weeks_ahead":4},"credentials":{"email":"...","password":"..."},"provider_config":{"cookies_file":".meetandplay_cookies.json"},"dry_run":true}' | python -m providers.meetandplay.provider
 ```
@@ -340,7 +372,7 @@ pytest tests/ -v
 pytest tests/ test_integration.py -v
 ```
 
-De `tests/` map bevat 234 tests voor alle modules:
+De `tests/` map bevat 262 tests voor alle modules:
 - `test_orchestrator.py` — deduplicatie, state, provider subprocess, first-wins logica, provider-selectie
 - `test_orchestrator_files.py` — boekingsgeschiedenis en `last_run.json`
 - `test_base.py` — ProviderResult JSON contract, gedeelde datum/tijd-helpers, provider entry point
@@ -351,6 +383,7 @@ De `tests/` map bevat 234 tests voor alle modules:
 - `test_session.py` — cookie/sessie beheer, automatisch inloggen
 - `test_fetch_bookings.py` — datum-parsing en omzetten van toekomstige boekingen
 - `test_research.py` — herkennen van release-strategieën met gesimuleerde clubs
+- `test_scheduler.py` — plannen van runs op vrijgavemomenten
 
 ### Lint
 
@@ -461,6 +494,7 @@ padel-booking/
 │       ├── provider.py              # entry point subprocess
 │       ├── client.py                # REST API client
 │       └── booking.py               # boekingslogica
+├── scheduler.py                     # plant runs op de vrijgavemomenten per club
 ├── research/booking_windows.py      # meet release-strategieën per club
 ├── tests/                           # unit tests (pytest)
 ├── test_integration.py              # integratietest Meet & Play (vereist credentials)

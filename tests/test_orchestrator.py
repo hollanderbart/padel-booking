@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from orchestrator import (
+    _remaining_target,
     _get_furthest_target_date,
     build_provider_request,
     enabled_providers,
@@ -350,3 +351,34 @@ class TestEnabledProviders:
             result = enabled_providers(config)
         assert [spec.name for spec, _, _ in result] == ["meetandplay"]
         assert "tijdelijk uitgeschakeld" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Gerichte runs (scheduler)
+# ---------------------------------------------------------------------------
+
+
+class TestTargetedRun:
+    CONFIG = {
+        "location": {"city": "Boskoop", "radius_km": 20},
+        "booking": {"day": "thursday", "time_start": "19:30", "time_end": "21:00"},
+    }
+    TARGET = {"dates": ["2026-10-22", "2026-10-29"], "clubs": [{"name": "C", "url": "u", "address": "a"}]}
+
+    def test_request_bevat_datums_en_clubs(self):
+        req = build_provider_request(self.CONFIG, {}, {}, dry_run=False, target=self.TARGET)
+        assert req["booking_request"]["only_dates"] == ["2026-10-22", "2026-10-29"]
+        assert req["booking_request"]["clubs"] == self.TARGET["clubs"]
+
+    def test_zonder_target_geen_beperking(self):
+        req = build_provider_request(self.CONFIG, {}, {}, dry_run=False)
+        assert "only_dates" not in req["booking_request"]
+
+    def test_al_geboekte_datums_vallen_af(self, tmp_path):
+        state = tmp_path / "state.json"
+        state.write_text(json.dumps({"booked_date": "2026-10-29"}))
+        assert _remaining_target(self.TARGET, {"2026-10-22"}, state) is None
+
+    def test_overgebleven_datums(self, tmp_path):
+        remaining = _remaining_target(self.TARGET, {"2026-10-22"}, tmp_path / "geen.json")
+        assert remaining["dates"] == ["2026-10-29"]
