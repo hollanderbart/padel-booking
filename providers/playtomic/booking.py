@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 
 from providers.base import (
     ProviderResult,
+    booking_days,
     hhmm_to_minutes,
     upcoming_booking_dates,
     without_skip_dates,
@@ -65,7 +66,7 @@ class PlaytomicBooker:
     # ------------------------------------------------------------------
 
     def _get_upcoming_booking_dates(self, count: int = 3) -> list[datetime]:
-        return upcoming_booking_dates(self._booking["day"], self._booking["time_start"], count)
+        return upcoming_booking_dates(booking_days(self._booking), self._booking["time_start"], count)
 
     # ------------------------------------------------------------------
     # Afstandsberekening

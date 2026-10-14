@@ -13,6 +13,7 @@ from providers import base
 from providers.base import (
     ProviderResult,
     SlotInfo,
+    booking_days,
     hhmm_to_minutes,
     read_request,
     upcoming_booking_dates,
@@ -124,6 +125,29 @@ class TestUpcomingBookingDates:
     def test_ongeldige_dag_gooit_valueerror(self):
         with pytest.raises(ValueError, match="Ongeldige dag"):
             upcoming_booking_dates("quatember")
+
+    def test_meerdere_dagen_chronologisch(self):
+        now = datetime(2026, 4, 9, 12, 0)
+        dates = upcoming_booking_dates(["thursday", "tuesday"], "19:30", count=2, now=now)
+        assert [d.date().isoformat() for d in dates] == ["2026-04-09", "2026-04-14", "2026-04-16", "2026-04-21"]
+
+
+class TestBookingDays:
+    def test_lijst_wordt_gesorteerd_en_ontdubbeld(self):
+        assert booking_days({"days": ["Thursday", "tuesday", "thursday"]}) == ["tuesday", "thursday"]
+
+    def test_oude_enkele_dag(self):
+        assert booking_days({"day": "thursday"}) == ["thursday"]
+
+    def test_days_wint_van_day(self):
+        assert booking_days({"days": ["monday"], "day": "thursday"}) == ["monday"]
+
+    def test_standaard_donderdag(self):
+        assert booking_days({}) == ["thursday"]
+
+    def test_ongeldige_dag(self):
+        with pytest.raises(ValueError, match="Ongeldige dag"):
+            booking_days({"days": ["thursday", "quatember"]})
 
 
 class TestWithoutSkipDates:

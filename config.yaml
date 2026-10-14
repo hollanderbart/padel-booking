@@ -6,7 +6,7 @@ location:
   longitude: 4.66
 
 booking:
-  day: thursday
+  days: [thursday]      # één of meer weekdagen, bijv. [tuesday, thursday]
   time_start: "19:30"
   time_end: "21:00"
   duration_minutes: 90  # 60 of 90 minuten
@@ -25,7 +25,7 @@ providers:
 fetch_bookings:
   enabled: true
   output_file: future_bookings.json
-  skip_booked_dates: true  # sla datums over die al in future_bookings.json staan
+  skip_booked_dates: true  # sla datums over met een reservering in je account (future_bookings.json)
 
 state:
   booking_state_file: .booking_state.json

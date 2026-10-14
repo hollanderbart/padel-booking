@@ -1,3 +1,12 @@
+## 2.5.0
+
+- Feature: meerdere weekdagen — nieuwe optie `booking_days` (lijst, bijv. dinsdag + donderdag) vervangt `booking_day`. Na de update staat `booking_days` op `thursday` (de standaardwaarde); had je een andere `booking_day`, pas `booking_days` dan aan in de addon-configuratie. `weeks_ahead` geldt per gekozen weekdag
+- Feature: alleen boeken op datums zonder reservering. Vóór elke volledige run (start addon en 00:01) worden je reserveringen opgehaald uit je account; die datums én datums waarvoor de addon eerder een slot vond (`booking_history.json`) worden overgeslagen
+- Een run boekt nu alle open datums (na elke boeking zoekt hij verder zonder die datum), in plaats van te stoppen na de eerste. Per slot een notificatie met betaallink
+- Fix: Meet & Play reserveringen ophalen gebruikte een niet-bestaande pagina (`mijn-reserveringen`) en geraden selectors. Nu via `meetandplay.nl/mijn-aankopen` (tabblad "Aankomend"), inclusief status; geannuleerde reserveringen tellen niet mee
+- Mislukt het ophalen van reserveringen (bijv. inloggen), dan blijft `future_bookings.json` ongewijzigd, zodat al geboekte datums niet opnieuw geprobeerd worden
+- Vervalt: de "verste doeldatum"-check op `.booking_state.json` en het aparte ophalen om 03:30. De reset-knop in de README werkt nu op `booking_history.json`
+
 ## 2.4.2
 
 - Docs: logs en status van de addon uitlezen via SSH (Terminal & SSH addon, `ha apps logs <slug>`) — de HA MCP-server geeft geen toegang tot addon-logs

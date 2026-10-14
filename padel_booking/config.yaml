@@ -1,5 +1,5 @@
 name: "Padel Booking"
-version: "2.4.2"
+version: "2.5.0"
 slug: "padel_booking"
 description: "Automatisch padelbanen boeken op meetandplay.nl en Playtomic"
 arch:
@@ -20,7 +20,8 @@ options:
   location_radius_km: 20
   location_latitude: 52.07
   location_longitude: 4.66
-  booking_day: "thursday"
+  booking_days:
+    - "thursday"
   booking_time_start: "19:30"
   booking_time_end: "21:00"
   duration_minutes: "90"
@@ -43,7 +44,9 @@ schema:
   location_radius_km: int
   location_latitude: float?
   location_longitude: float?
-  booking_day: list(monday|tuesday|wednesday|thursday|friday|saturday|sunday)
+  booking_days:
+    - list(monday|tuesday|wednesday|thursday|friday|saturday|sunday)
+  booking_day: list(monday|tuesday|wednesday|thursday|friday|saturday|sunday)?
   booking_time_start: match([0-2][0-9]:[0-5][0-9])
   booking_time_end: match([0-2][0-9]:[0-5][0-9])
   duration_minutes: list(60|90)

@@ -4,19 +4,21 @@ Unit tests voor orchestrator.py — geen browser of credentials nodig.
 
 import asyncio
 import json
-from datetime import date, timedelta
+from datetime import date, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
 
+import orchestrator
 from orchestrator import (
     _remaining_target,
-    _get_furthest_target_date,
     build_provider_request,
     enabled_providers,
-    is_already_booked,
     load_config,
+    load_handled_dates,
+    main_async,
+    open_dates,
     run_all_providers,
     run_provider,
     save_booking_state,
@@ -88,54 +90,45 @@ class TestLoadConfig:
 
 
 # ---------------------------------------------------------------------------
-# is_already_booked
+# Al geboekte datums / open datums
 # ---------------------------------------------------------------------------
 
-class TestIsAlreadyBooked:
-    # booking_cfg met een dag ver in de toekomst zodat furthest_target_date altijd
-    # minstens weeks_ahead weken vooruit ligt — onafhankelijk van de dag waarop de test draait.
-    BOOKING_CFG = {"day": "thursday", "weeks_ahead": 4}
+class TestLoadHandledDates:
+    TODAY = date(2026, 10, 14)
 
-    def test_geen_bestand_retourneert_false(self, tmp_path):
-        assert is_already_booked(tmp_path / "geen.json", self.BOOKING_CFG) is False
+    def test_geen_bestand_geeft_lege_set(self, tmp_path):
+        assert load_handled_dates(tmp_path / "geen.json", self.TODAY) == set()
 
-    def test_verste_doeldatum_geboekt_retourneert_true(self, tmp_path):
-        """Als de boekingsdatum >= de verste doeldatum is, overslaan."""
-        furthest = _get_furthest_target_date(self.BOOKING_CFG)
-        f = tmp_path / "state.json"
-        f.write_text(json.dumps({"booked_date": furthest.isoformat()}))
-        assert is_already_booked(f, self.BOOKING_CFG) is True
+    def test_alleen_toekomstige_datums(self, tmp_path):
+        f = tmp_path / "history.json"
+        f.write_text(json.dumps([
+            {"booked_date": "2026-10-22"},
+            {"booked_date": "2026-10-14"},
+            {"booked_date": "2026-10-08"},
+            {"provider": "meetandplay"},
+        ]))
+        assert load_handled_dates(f, self.TODAY) == {"2026-10-22", "2026-10-14"}
 
-    def test_datum_voorbij_verste_doeldatum_retourneert_true(self, tmp_path):
-        furthest = _get_furthest_target_date(self.BOOKING_CFG)
-        ver_weg = (furthest + timedelta(weeks=2)).isoformat()
-        f = tmp_path / "state.json"
-        f.write_text(json.dumps({"booked_date": ver_weg}))
-        assert is_already_booked(f, self.BOOKING_CFG) is True
-
-    def test_datum_voor_verste_doeldatum_retourneert_false(self, tmp_path):
-        """Als er nog latere data in het zoekvenster zitten, doorgaan met zoeken."""
-        furthest = _get_furthest_target_date(self.BOOKING_CFG)
-        eerder = (furthest - timedelta(weeks=1)).isoformat()
-        f = tmp_path / "state.json"
-        f.write_text(json.dumps({"booked_date": eerder}))
-        assert is_already_booked(f, self.BOOKING_CFG) is False
-
-    def test_verleden_datum_retourneert_false(self, tmp_path):
-        f = tmp_path / "state.json"
-        past = (date.today() - timedelta(days=1)).isoformat()
-        f.write_text(json.dumps({"booked_date": past}))
-        assert is_already_booked(f, self.BOOKING_CFG) is False
-
-    def test_corrupt_json_retourneert_false(self, tmp_path):
-        f = tmp_path / "state.json"
+    def test_corrupt_bestand_geeft_lege_set(self, tmp_path):
+        f = tmp_path / "history.json"
         f.write_text("GEEN_JSON{{{")
-        assert is_already_booked(f, self.BOOKING_CFG) is False
+        assert load_handled_dates(f, self.TODAY) == set()
 
-    def test_ontbrekend_booked_date_veld_retourneert_false(self, tmp_path):
-        f = tmp_path / "state.json"
-        f.write_text(json.dumps({"provider": "meetandplay"}))
-        assert is_already_booked(f, self.BOOKING_CFG) is False
+
+class TestOpenDates:
+    NOW = datetime(2026, 10, 14, 12, 0)  # woensdag
+
+    def test_een_dag(self):
+        cfg = {"day": "thursday", "time_start": "19:30", "weeks_ahead": 3}
+        assert open_dates(cfg, set(), self.NOW) == ["2026-10-15", "2026-10-22", "2026-10-29"]
+
+    def test_meerdere_dagen_chronologisch(self):
+        cfg = {"days": ["thursday", "tuesday"], "time_start": "19:30", "weeks_ahead": 2}
+        assert open_dates(cfg, set(), self.NOW) == ["2026-10-15", "2026-10-20", "2026-10-22", "2026-10-27"]
+
+    def test_geboekte_datums_vallen_af(self):
+        cfg = {"days": ["thursday"], "time_start": "19:30", "weeks_ahead": 3}
+        assert open_dates(cfg, {"2026-10-22"}, self.NOW) == ["2026-10-15", "2026-10-29"]
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +175,7 @@ class TestBuildProviderRequest:
             dry_run=False,
         )
         br = req["booking_request"]
-        assert br["day"] == "thursday"
+        assert br["days"] == ["thursday"]
         assert br["time_start"] == "19:30"
         assert br["time_end"] == "21:00"
         assert br["duration_minutes"] == 90
@@ -374,11 +367,75 @@ class TestTargetedRun:
         req = build_provider_request(self.CONFIG, {}, {}, dry_run=False)
         assert "only_dates" not in req["booking_request"]
 
-    def test_al_geboekte_datums_vallen_af(self, tmp_path):
-        state = tmp_path / "state.json"
-        state.write_text(json.dumps({"booked_date": "2026-10-29"}))
-        assert _remaining_target(self.TARGET, {"2026-10-22"}, state) is None
+    def test_meerdere_dagen_in_request(self):
+        config = {**self.CONFIG, "booking": {**self.CONFIG["booking"], "days": ["tuesday", "thursday"]}}
+        req = build_provider_request(config, {}, {}, dry_run=False)
+        assert req["booking_request"]["days"] == ["tuesday", "thursday"]
 
-    def test_overgebleven_datums(self, tmp_path):
-        remaining = _remaining_target(self.TARGET, {"2026-10-22"}, tmp_path / "geen.json")
+    def test_al_geboekte_datums_vallen_af(self):
+        assert _remaining_target(self.TARGET, {"2026-10-22", "2026-10-29"}) is None
+
+    def test_overgebleven_datums(self):
+        remaining = _remaining_target(self.TARGET, {"2026-10-22"})
         assert remaining["dates"] == ["2026-10-29"]
+
+
+# ---------------------------------------------------------------------------
+# main_async — alle open datums boeken
+# ---------------------------------------------------------------------------
+
+
+class TestMainAsync:
+    @pytest.fixture
+    def setup(self, tmp_path, monkeypatch):
+        config = _minimal_config()
+        config["booking"]["weeks_ahead"] = 2
+        config["state"] = {
+            "booking_state_file": str(tmp_path / "state.json"),
+            "history_file": str(tmp_path / "history.json"),
+            "last_run_file": str(tmp_path / "last_run.json"),
+        }
+        config["fetch_bookings"] = {"skip_booked_dates": True, "output_file": str(tmp_path / "future.json")}
+        monkeypatch.setattr(orchestrator, "load_config", lambda: config)
+        monkeypatch.setattr(orchestrator, "load_dotenv", lambda: None)
+        monkeypatch.setattr(orchestrator, "notify_booking_available", lambda *a: None)
+        monkeypatch.setattr(orchestrator, "open_dates", lambda cfg, skip: [
+            d for d in ["2026-10-15", "2026-10-22"] if d not in skip
+        ])
+        return tmp_path
+
+    @staticmethod
+    def _provider_that_books_first_open_date(seen_skips):
+        async def fake_run_all(requests, debug):
+            skip = requests[0][1]["booking_request"]["skip_dates"]
+            seen_skips.append(list(skip))
+            free = [d for d in ["2026-10-15", "2026-10-22"] if d not in skip]
+            if not free:
+                return None
+            return {"success": True, "provider": "meetandplay", "booked_date": free[0], "slot_info": _slot_info()}
+        return fake_run_all
+
+    @pytest.mark.asyncio
+    async def test_boekt_alle_open_datums(self, setup, monkeypatch):
+        seen = []
+        monkeypatch.setattr(orchestrator, "run_all_providers", self._provider_that_books_first_open_date(seen))
+        assert await main_async(debug=False, dry_run=False) == 0
+        history = json.loads((setup / "history.json").read_text())
+        assert sorted(e["booked_date"] for e in history) == ["2026-10-15", "2026-10-22"]
+        assert seen == [[], ["2026-10-15"]]
+
+    @pytest.mark.asyncio
+    async def test_account_boekingen_worden_overgeslagen(self, setup, monkeypatch):
+        (setup / "future.json").write_text(json.dumps([{"booked_date": "2026-10-15"}]))
+        seen = []
+        monkeypatch.setattr(orchestrator, "run_all_providers", self._provider_that_books_first_open_date(seen))
+        assert await main_async(debug=False, dry_run=False) == 0
+        assert seen == [["2026-10-15"]]
+
+    @pytest.mark.asyncio
+    async def test_alles_geboekt_start_geen_providers(self, setup, monkeypatch):
+        (setup / "future.json").write_text(json.dumps([{"booked_date": "2026-10-15"}, {"booked_date": "2026-10-22"}]))
+        run_all = AsyncMock()
+        monkeypatch.setattr(orchestrator, "run_all_providers", run_all)
+        assert await main_async(debug=False, dry_run=False) == 0
+        run_all.assert_not_called()
