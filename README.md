@@ -481,6 +481,14 @@ Mogelijke oorzaken:
 - **Tijdvenster te smal**: het slot valt net buiten `booking_time_start`–`booking_time_end`
 - **Duur mismatch**: de site toont bijv. "60 min" maar `duration_minutes` staat op `90`
 - **Buitenbaan filter**: het label van het slot bevat "buiten" terwijl `court_type=indoor`
+- **Enkelspel filter**: bij `game_type=double` worden banen overgeslagen met "enkelspel" in het label of "single" / "max. 2 spelers" in de baannaam
+
+### Meerdere boekingen achter elkaar (Meet & Play)
+
+Meet & Play staat per sessie één openstaande (nog niet betaalde) reservering toe. Vindt de addon in één
+run meerdere datums, dan verschijnt bij de tweede de pop-up "Je reservering bij …". De addon kiest
+"Annuleren" en logt opnieuw in voor een nieuwe sessie, zodat de eerste betaallink geldig blijft. In de log:
+`Openstaande reservering in deze sessie — pop-up annuleren` gevolgd door `Nieuwe sessie starten`.
 
 ### Script vindt geen banen
 

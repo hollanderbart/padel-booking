@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from providers.meetandplay.booking import MeetAndPlayBooker
+from providers.meetandplay.booking import MeetAndPlayBooker, PendingReservationError
 from providers.base import ProviderResult
 
 
@@ -280,6 +280,18 @@ class TestFindTimeslotFilters:
             booker._find_timeslot(page, club)
 
         assert any("enkelspel" in r.message.lower() for r in caplog.records)
+
+    @pytest.mark.parametrize("court_name", [
+        "Padelhal | Baan 5 (SINGLE | max. 2 spelers)",
+        "Baan 3 (max. 2 spelers)",
+    ])
+    def test_enkelspel_in_baannaam_wordt_overgeslagen_voor_dubbelspel(self, court_name):
+        booker = _make_booker(_make_request(game_type="double"))
+        slot = self._make_slot_mock(court_label="binnen • dubbelspel", time_text="19:30\n90 min", court_name=court_name)
+        page = self._make_page_with_slots([slot])
+        club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
+
+        assert booker._find_timeslot(page, club) is None
 
     def test_dubbelspel_wordt_overgeslagen_voor_enkelspel(self):
         booker = _make_booker(_make_request(game_type="single"))
@@ -583,12 +595,55 @@ class TestAddToCartEigenKnop:
         page_button = _locator()
         page = MagicMock()
         page.locator.side_effect = lambda sel: (
-            _locator(inner=own_button) if "slot-1" in sel else page_button
+            _locator(inner=own_button) if "slot-1" in sel
+            else _locator(count=0) if "erase" in sel
+            else page_button
         )
 
         assert booker._add_to_cart(page, "slot-1") is True
         own_button.first.click.assert_called_once()
         page_button.first.click.assert_not_called()
+
+
+class TestOpenstaandeReservering:
+    """Pop-up "Je reservering bij …": niet 'Doorgaan' (laat de andere reservering vervallen) maar annuleren."""
+
+    SLOT = {"slot_id": "slot-1", "time_range": "19:30", "club_name": "Club A"}
+
+    def _page_with_popup(self):
+        erase, hide = _locator(), _locator()
+        page = MagicMock()
+        page.locator.side_effect = lambda sel: (
+            erase if "erase" in sel
+            else hide if "hide" in sel
+            else _locator(inner=_locator()) if "slot-1" in sel
+            else _locator()
+        )
+        return page, erase, hide
+
+    def test_pop_up_wordt_geannuleerd_en_gemeld(self):
+        booker = _make_booker()
+        page, erase, hide = self._page_with_popup()
+        with pytest.raises(PendingReservationError):
+            booker._add_to_cart(page, "slot-1")
+        hide.first.click.assert_called_once()
+        erase.first.click.assert_not_called()
+
+    def test_nieuwe_sessie_en_opnieuw_boeken(self):
+        booker = _make_booker()
+        club = {"name": "Club A", "url": "http://x", "address": "Straat"}
+        slot = {**self.SLOT, "court_name": "Baan 1", "club_address": "Straat", "payment_url": "https://pay"}
+        fresh_page = MagicMock()
+
+        with patch.object(booker, "_find_timeslot", return_value=dict(slot)), \
+             patch.object(booker, "_book_timeslot", side_effect=[PendingReservationError(), True]) as book, \
+             patch.object(booker, "_fresh_session_page", return_value=fresh_page) as fresh:
+            result = booker._try_dates_and_clubs(MagicMock(), [datetime(2026, 10, 29)], [club])
+
+        assert result.success is True
+        assert result.booked_date == "2026-10-29"
+        fresh.assert_called_once()
+        assert book.call_args.args[0] is fresh_page
 
 
 # ---------------------------------------------------------------------------
