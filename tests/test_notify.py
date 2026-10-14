@@ -2,18 +2,10 @@
 Unit tests voor notify.py.
 """
 
-import subprocess
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
-from notify import (
-    Notifier,
-    notify_booking_available,
-    notify_booking_error,
-    notify_no_courts_available,
-    notify_session_expired,
-)
+from notify import Notifier, _applescript_str, notify_booking_available
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +180,7 @@ class TestNotifyFunctions:
             notify_booking_available("Baan 1", "19:30 - 21:00", "Club A — Straat 1", "https://pay.nl")
         instance.send.assert_called_once()
         args, kwargs = instance.send.call_args
-        assert "Padelbaan geboekt" in kwargs.get("title", args[0] if args else "")
+        assert "Padelbaan beschikbaar" in kwargs.get("title", args[0] if args else "")
 
     def test_notify_booking_available_zonder_url(self, monkeypatch):
         monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
@@ -208,29 +200,7 @@ class TestNotifyFunctions:
         assert "20:00 - 21:30" in msg
         assert "Sportcentrum Boskoop" in msg
 
-    def test_notify_no_courts_stuurt_melding(self, monkeypatch):
-        monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
-        with patch("notify.Notifier") as MockNotifier:
-            instance = MockNotifier.return_value
-            notify_no_courts_available()
-        instance.send.assert_called_once()
-        _, kwargs = instance.send.call_args
-        assert kwargs.get("sound") is False
 
-    def test_notify_booking_error_stuurt_melding(self, monkeypatch):
-        monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
-        with patch("notify.Notifier") as MockNotifier:
-            instance = MockNotifier.return_value
-            notify_booking_error("Timeout bij inloggen")
-        instance.send.assert_called_once()
-        _, kwargs = instance.send.call_args
-        assert "Timeout bij inloggen" in kwargs.get("message", "")
-
-    def test_notify_session_expired_stuurt_melding(self, monkeypatch):
-        monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
-        with patch("notify.Notifier") as MockNotifier:
-            instance = MockNotifier.return_value
-            notify_session_expired()
-        instance.send.assert_called_once()
-        _, kwargs = instance.send.call_args
-        assert "verlopen" in kwargs.get("message", "").lower() or "verlopen" in kwargs.get("title", "").lower()
+class TestAppleScriptQuoting:
+    def test_escapet_quotes_en_backslashes(self):
+        assert _applescript_str('a "b" \\c') == '"a \\"b\\" \\\\c"'

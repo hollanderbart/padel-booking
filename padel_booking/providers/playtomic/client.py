@@ -7,9 +7,9 @@ API base: https://api.playtomic.io
 
 import json
 import logging
-from datetime import datetime, timezone
+from http import HTTPStatus
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
-from typing import Optional
 
 import requests
 
@@ -25,6 +25,12 @@ HEADERS = {
     ),
     "Content-Type": "application/json",
 }
+REQUEST_TIMEOUT = 30  # seconden — voorkom dat een hangende verbinding de nachtelijke run blokkeert
+
+# Alleen offline methoden werken via de API — online methoden zoals iDEAL,
+# Bancontact en Swish vereisen een browser-redirect en leveren een 503 op.
+OFFLINE_METHODS = {"at_the_club", "at the club", "cash", "merchant_wallet", "pay at the club", "offer"}
+ONLINE_ONLY_METHODS = {"ideal", "bancontact", "swish", "paytrail", "credit_card", "quick_pay", "direct"}
 
 
 class PlaytomicAuthError(Exception):
@@ -35,6 +41,47 @@ class NoSuitablePaymentMethodError(Exception):
     pass
 
 
+def _log_error_body(resp: requests.Response, what: str) -> None:
+    if resp.ok:
+        return
+    try:
+        error_body = resp.json()
+    except ValueError:
+        error_body = resp.text
+    logger.warning("%s mislukt (%s) response body: %s", what, resp.status_code, error_body)
+
+
+def _method_name(method: dict) -> str:
+    return (method.get("name") or method.get("payment_method_type") or "").lower()
+
+
+def _method_id(method: dict) -> str | None:
+    return method.get("payment_method_id") or method.get("id")
+
+
+def _select_payment_method_id(methods: list[dict]) -> str | None:
+    """
+    Kies bij voorkeur een offline methode ('betaal ter plaatse').
+    Valt terug op de eerste methode, tenzij er alleen online methoden zijn.
+    """
+    for method in methods:
+        name = _method_name(method)
+        if any(p in name for p in OFFLINE_METHODS):
+            logger.info("Betaalmethode geselecteerd: %s (id: %s)", name, _method_id(method))
+            return _method_id(method)
+
+    if not methods:
+        return None
+
+    names = [_method_name(m) for m in methods]
+    if all(any(o in n for o in ONLINE_ONLY_METHODS) for n in names if n):
+        raise NoSuitablePaymentMethodError(
+            f"Geen offline betaalmethode beschikbaar — alleen: {', '.join(names)}"
+        )
+    logger.info("Geen voorkeursmethode gevonden — eerste methode gebruikt: %s", methods[0].get("name"))
+    return _method_id(methods[0])
+
+
 class PlaytomicClient:
     """REST API client voor Playtomic."""
 
@@ -42,9 +89,9 @@ class PlaytomicClient:
         self._email = email
         self._password = password
         self._token_cache = Path(token_cache_file)
-        self._access_token: Optional[str] = None
-        self._token_expiry: Optional[datetime] = None
-        self._user_id: Optional[str] = None
+        self._access_token: str | None = None
+        self._token_expiry: datetime | None = None
+        self._user_id: str | None = None
         self._session = requests.Session()
         self._session.headers.update(HEADERS)
         self._load_cached_token()
@@ -57,36 +104,35 @@ class PlaytomicClient:
         if not self._token_cache.exists():
             return
         try:
-            with open(self._token_cache) as f:
+            with open(self._token_cache, encoding="utf-8") as f:
                 data = json.load(f)
             expiry = datetime.fromisoformat(data["expiry"])
             if expiry.tzinfo is None:
-                expiry = expiry.replace(tzinfo=timezone.utc)
-            if expiry > datetime.now(tz=timezone.utc):
+                expiry = expiry.replace(tzinfo=UTC)
+            if expiry > datetime.now(tz=UTC):
                 self._access_token = data["access_token"]
                 self._token_expiry = expiry
                 self._user_id = data.get("user_id")
                 logger.info("Playtomic token geladen uit cache (verloopt %s)", expiry.isoformat())
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             logger.debug("Kon token cache niet laden: %s", e)
 
-    def _save_cached_token(self, access_token: str, expiry: datetime, user_id: Optional[str] = None) -> None:
+    def _save_cached_token(self, access_token: str, expiry: datetime, user_id: str | None = None) -> None:
         try:
-            with open(self._token_cache, "w") as f:
+            with open(self._token_cache, "w", encoding="utf-8") as f:
                 json.dump({
                     "access_token": access_token,
                     "expiry": expiry.isoformat(),
                     "user_id": user_id,
                 }, f)
-        except Exception as e:
+        except OSError as e:
             logger.warning("Kon token cache niet opslaan: %s", e)
 
     def _is_token_valid(self) -> bool:
         if not self._access_token or not self._token_expiry:
             return False
         # Vervalt token binnen 5 minuten? Beschouw als verlopen.
-        from datetime import timedelta
-        return self._token_expiry > datetime.now(tz=timezone.utc) + timedelta(minutes=5)
+        return self._token_expiry > datetime.now(tz=UTC) + timedelta(minutes=5)
 
     def authenticate(self) -> None:
         """Log in bij Playtomic en sla het JWT token op."""
@@ -94,8 +140,9 @@ class PlaytomicClient:
         resp = self._session.post(
             f"{API_BASE}/v3/auth/login",
             json={"email": self._email, "password": self._password},
+            timeout=REQUEST_TIMEOUT,
         )
-        if resp.status_code == 401:
+        if resp.status_code == HTTPStatus.UNAUTHORIZED:
             raise PlaytomicAuthError("Playtomic inloggen mislukt — controleer PLAYTOMIC_EMAIL/PLAYTOMIC_PASSWORD")
         resp.raise_for_status()
 
@@ -106,11 +153,10 @@ class PlaytomicClient:
         if expiry_str:
             expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
             if expiry.tzinfo is None:
-                expiry = expiry.replace(tzinfo=timezone.utc)
+                expiry = expiry.replace(tzinfo=UTC)
             self._token_expiry = expiry
         else:
-            from datetime import timedelta
-            self._token_expiry = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+            self._token_expiry = datetime.now(tz=UTC) + timedelta(hours=1)
 
         self._save_cached_token(self._access_token, self._token_expiry, self._user_id)
         logger.info("Playtomic inloggen gelukt (user_id: %s, token verloopt %s)", self._user_id, self._token_expiry.isoformat())
@@ -119,6 +165,10 @@ class PlaytomicClient:
         if not self._is_token_valid():
             self.authenticate()
         self._session.headers["Authorization"] = f"Bearer {self._access_token}"
+
+    @property
+    def user_id(self) -> str | None:
+        return self._user_id
 
     # ------------------------------------------------------------------
     # API calls
@@ -134,6 +184,7 @@ class PlaytomicClient:
                 "radius": radius_m,
                 "size": 20,
             },
+            timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         clubs = resp.json()
@@ -157,6 +208,7 @@ class PlaytomicClient:
                 "start_min": start_min,
                 "start_max": start_max,
             },
+            timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         slots = resp.json()
@@ -208,19 +260,14 @@ class PlaytomicClient:
             },
         }
         logger.debug("Payment intent payload: %s", payload)
-        resp = self._session.post(f"{API_BASE}/v1/payment_intents", json=payload)
-        if not resp.ok:
-            try:
-                error_body = resp.json()
-            except Exception:
-                error_body = resp.text
-            logger.warning("Payment intent mislukt (%s) response body: %s", resp.status_code, error_body)
+        resp = self._session.post(f"{API_BASE}/v1/payment_intents", json=payload, timeout=REQUEST_TIMEOUT)
+        _log_error_body(resp, "Payment intent")
         resp.raise_for_status()
         intent = resp.json()
         logger.info("Payment intent aangemaakt: %s", intent.get("payment_intent_id") or intent.get("id"))
         return intent
 
-    def set_payment_method(self, intent_id: str, intent_response: Optional[dict] = None) -> dict:
+    def set_payment_method(self, intent_id: str, intent_response: dict | None = None) -> dict:
         """
         Stap 2 van boeking: selecteer betaalmethode 'betaal ter plaatse'.
 
@@ -229,43 +276,14 @@ class PlaytomicClient:
         Valt terug op de eerste beschikbare methode als geen match gevonden.
         """
         self._ensure_authenticated()
-
-        # Bepaal de payment method ID uit de intent response.
-        # Alleen offline methoden werken via de API — online methoden zoals iDEAL,
-        # Bancontact en Swish vereisen een browser-redirect en leveren een 503 op.
-        OFFLINE_METHODS = {"at_the_club", "at the club", "cash", "merchant_wallet", "pay at the club", "offer"}
-        ONLINE_ONLY = {"ideal", "bancontact", "swish", "paytrail", "credit_card", "quick_pay", "direct"}
-
-        payment_method_id = None
-        if intent_response:
-            methods = intent_response.get("available_payment_methods") or []
-            for method in methods:
-                name = (method.get("name") or method.get("payment_method_type") or "").lower()
-                if any(p in name for p in OFFLINE_METHODS):
-                    payment_method_id = method.get("payment_method_id") or method.get("id")
-                    logger.info("Betaalmethode geselecteerd: %s (id: %s)", name, payment_method_id)
-                    break
-
-            if not payment_method_id and methods:
-                # Controleer of er überhaupt een niet-online methode beschikbaar is
-                available_names = [
-                    (m.get("name") or m.get("payment_method_type") or "").lower()
-                    for m in methods
-                ]
-                if all(any(o in n for o in ONLINE_ONLY) for n in available_names if n):
-                    raise NoSuitablePaymentMethodError(
-                        f"Geen offline betaalmethode beschikbaar — alleen: {', '.join(available_names)}"
-                    )
-                first = methods[0]
-                payment_method_id = first.get("payment_method_id") or first.get("id")
-                logger.info("Geen voorkeursmethode gevonden — eerste methode gebruikt: %s", first.get("name"))
-
+        methods = (intent_response or {}).get("available_payment_methods") or []
         resp = self._session.patch(
             f"{API_BASE}/v1/payment_intents/{intent_id}",
             json={
-                "selected_payment_method_id": payment_method_id,
+                "selected_payment_method_id": _select_payment_method_id(methods),
                 "selected_payment_method_data": None,
             },
+            timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         return resp.json()
@@ -274,15 +292,35 @@ class PlaytomicClient:
         """Stap 3 van boeking: bevestig de boeking."""
         self._ensure_authenticated()
         resp = self._session.post(
-            f"{API_BASE}/v1/payment_intents/{intent_id}/confirmation"
+            f"{API_BASE}/v1/payment_intents/{intent_id}/confirmation",
+            timeout=REQUEST_TIMEOUT,
         )
-        if not resp.ok:
-            try:
-                error_body = resp.json()
-            except Exception:
-                error_body = resp.text
-            logger.warning("Bevestiging mislukt (%s) response body: %s", resp.status_code, error_body)
+        _log_error_body(resp, "Bevestiging")
         resp.raise_for_status()
         result = resp.json()
         logger.info("Boeking bevestigd via Playtomic: %s", intent_id)
         return result
+
+    def get_upcoming_matches(self) -> list[dict]:
+        """Haal bevestigde toekomstige matches (boekingen) van de ingelogde gebruiker op."""
+        self._ensure_authenticated()
+        if not self._user_id:
+            logger.warning("Playtomic user_id niet beschikbaar — boekingen ophalen niet mogelijk")
+            return []
+        resp = self._session.get(
+            f"{API_BASE}/v1/matches",
+            params={
+                "user_id": self._user_id,
+                "status": "CONFIRMED",
+                "start_min": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+                "size": 50,
+                "sort": "start_date,asc",
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+        # Gepagineerd object {"content": [...]} of een kale lijst bij oudere endpoints.
+        if isinstance(raw, dict):
+            return raw.get("content") or raw.get("data") or raw.get("matches") or []
+        return raw

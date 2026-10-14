@@ -4,9 +4,8 @@ Unit tests voor providers/meetandplay/session.py.
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from providers.meetandplay.session import SessionManager
 
@@ -187,3 +186,81 @@ class TestIsLoggedIn:
         page.goto.assert_called()
         call_url = page.goto.call_args[0][0]
         assert "meetandplay.nl" in call_url
+
+
+# ---------------------------------------------------------------------------
+# auto_login
+# ---------------------------------------------------------------------------
+
+def _login_browser(page):
+    browser = MagicMock()
+    context = MagicMock()
+    browser.new_context.return_value = context
+    context.new_page.return_value = page
+    return browser, context
+
+
+def _login_page(present: set[str], html=""):
+    """Page-mock waarbij selectors die een substring uit `present` bevatten gevonden worden."""
+    page = _make_page(url="https://www.meetandplay.nl/inloggen", html=html)
+
+    def locator(selector):
+        loc = MagicMock()
+        loc.count.return_value = 1 if any(key in selector for key in present) else 0
+        return loc
+
+    page.locator.side_effect = locator
+    return page
+
+
+class TestAutoLogin:
+    def test_legacy_flow_slaat_cookies_op(self, tmp_path):
+        m = _make_manager(tmp_path)
+        page = _login_page({'input[type="password"]', "form[wire", 'button[type="submit"]'})
+        browser, context = _login_browser(page)
+
+        with patch.object(m, "is_logged_in", return_value=True), patch.object(m, "save_cookies") as save:
+            result, ok = m.auto_login(browser, "a@b.nl", "pw")
+
+        assert ok is True
+        assert result is context
+        save.assert_called_once_with(context)
+
+    def test_sso_flow_navigeert_naar_sso_link(self, tmp_path):
+        m = _make_manager(tmp_path)
+        page = _login_page(
+            {'input[name="Login.Email"]', 'input[name="Password"]', 'button[type="submit"]'},
+            html='<a href="https://meetandplay.nl/knltb-id/sso?a=1&amp;b=2">KNLTB ID</a>',
+        )
+        # Geen legacy wachtwoordveld op de meetandplay-pagina zelf
+        original = page.locator.side_effect
+        page.locator.side_effect = lambda sel: (
+            MagicMock(count=MagicMock(return_value=0)) if "wire\\:model" in sel else original(sel)
+        )
+        browser, _ = _login_browser(page)
+
+        with patch.object(m, "is_logged_in", return_value=True), patch.object(m, "save_cookies"):
+            _, ok = m.auto_login(browser, "a@b.nl", "pw")
+
+        assert ok is True
+        page.goto.assert_any_call("https://meetandplay.nl/knltb-id/sso?a=1&b=2", wait_until="load", timeout=30000)
+
+    def test_mislukte_login_sluit_context(self, tmp_path):
+        m = _make_manager(tmp_path)
+        page = _login_page(set())
+        browser, context = _login_browser(page)
+
+        with patch.object(m, "is_logged_in", return_value=False):
+            result, ok = m.auto_login(browser, "a@b.nl", "pw")
+
+        assert (result, ok) == (None, False)
+        context.close.assert_called_once()
+
+    def test_exception_tijdens_login_geeft_false(self, tmp_path):
+        m = _make_manager(tmp_path)
+        page = _make_page()
+        page.goto.side_effect = Exception("netwerk weg")
+        browser, _ = _login_browser(page)
+
+        _, ok = m.auto_login(browser, "a@b.nl", "pw")
+        assert ok is False

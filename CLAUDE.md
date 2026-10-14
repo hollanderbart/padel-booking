@@ -25,6 +25,7 @@ Gebruik [semantic versioning](https://semver.org/):
 2. **Sync gewijzigde bestanden naar `padel_booking/`** — de Dockerfile gebruikt de addon-directory als build context:
    - `orchestrator.py` → `padel_booking/orchestrator.py`
    - `notify.py` → `padel_booking/notify.py`
+   - `fetch_bookings.py` → `padel_booking/fetch_bookings.py`
    - `providers/` → `padel_booking/providers/`
 3. Verhoog het versienummer in `padel_booking/config.yaml`
 4. **Voeg een entry toe aan `padel_booking/CHANGELOG.md`** met het nieuwe versienummer en een beknopte beschrijving van de wijzigingen (nieuwste versie bovenaan)
@@ -63,9 +64,10 @@ padel-booking/
 │   ├── booking_config.yaml          # standaard booking configuratie
 │   └── CHANGELOG.md
 ├── orchestrator.py                  # hoofdscript — coördineert providers
+├── fetch_bookings.py                # haalt toekomstige boekingen op
 ├── notify.py                        # notificaties (HA push + macOS + console)
 ├── providers/
-│   ├── base.py                      # ProviderResult contract (stdin/stdout JSON)
+│   ├── base.py                      # ProviderResult contract + gedeelde datum/tijd-helpers
 │   ├── meetandplay/
 │   │   ├── provider.py              # __main__ entry point
 │   │   ├── booking.py               # Playwright browser automatisering

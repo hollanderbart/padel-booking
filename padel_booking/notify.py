@@ -17,6 +17,11 @@ except ImportError:
     _HAS_REQUESTS = False
 
 
+def _applescript_str(value: str) -> str:
+    """Quote een string als AppleScript-literal (backslashes en quotes escapen)."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 class Notifier:
     """Beheer notificaties voor verschillende platformen."""
 
@@ -61,19 +66,17 @@ class Notifier:
             resp = _requests.post(service_url, json=payload, headers=headers, timeout=10)
             resp.raise_for_status()
             logger.info("HA push notificatie verzonden: %s", title)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — notificatie is best-effort
             logger.warning("HA push notificatie mislukt: %s — fallback naar console", e)
             self._send_console(title, message)
 
     def _send_macos(self, title: str, message: str, sound: bool = True) -> None:
         try:
-            title = title.replace('"', '\\"')
-            message = message.replace('"', '\\"')
-            sound_part = ' sound name "default"' if sound else ''
-            script = f'display notification "{message}" with title "{title}"{sound_part}'
+            sound_part = ' sound name "default"' if sound else ""
+            script = f'display notification {_applescript_str(message)} with title {_applescript_str(title)}{sound_part}'
             subprocess.run(['osascript', '-e', script], check=True, capture_output=True, text=True)
             logger.info("macOS notificatie verzonden: %s", title)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — notificatie is best-effort
             logger.warning("macOS notificatie mislukt: %s", e)
             self._send_console(title, message)
 
@@ -86,46 +89,18 @@ class Notifier:
         print(f"{separator}\n")
 
 
-def notify_booking_available(court_name: str, time: str, location: str, payment_url: str = "", booked_date: str = "", provider: str = "") -> None:
+def notify_booking_available(
+    court_name: str,
+    time: str,
+    location: str,
+    payment_url: str = "",
+    booked_date: str = "",
+    provider: str = "",
+) -> None:
     notifier = Notifier()
     date_line = f"{booked_date}\n" if booked_date else ""
     provider_line = f"via {provider}\n" if provider else ""
     message = f"{date_line}{provider_line}{court_name} — {time}\n{location}"
     if payment_url:
-        message += f"\n\nBoek nu: {location.split(' — ')[0]}"
+        message += f"\n\nBoek nu: {location.split(' — ', maxsplit=1)[0]}"
     notifier.send(title="Padelbaan beschikbaar!", message=message, sound=True, url=payment_url)
-
-
-def notify_no_courts_available() -> None:
-    """Verstuur notificatie dat er geen banen beschikbaar zijn."""
-    notifier = Notifier()
-    notifier.send(
-        title="Geen padelbanen beschikbaar",
-        message="Er zijn momenteel geen binnenbanen beschikbaar in de opgegeven regio en tijd.",
-        sound=False
-    )
-
-
-def notify_booking_error(error_message: str) -> None:
-    """
-    Verstuur notificatie bij een fout in het boekingsproces.
-
-    Args:
-        error_message: Beschrijving van de fout
-    """
-    notifier = Notifier()
-    notifier.send(
-        title="Fout bij boeken padelbaan",
-        message=f"Er is een fout opgetreden: {error_message}",
-        sound=True
-    )
-
-
-def notify_session_expired() -> None:
-    """Verstuur notificatie dat de sessie is verlopen."""
-    notifier = Notifier()
-    notifier.send(
-        title="Sessie verlopen",
-        message="Je sessie is verlopen. Log opnieuw in via de browser.",
-        sound=True
-    )

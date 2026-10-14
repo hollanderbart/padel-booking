@@ -311,14 +311,26 @@ pytest tests/ -v
 pytest tests/ test_integration.py -v
 ```
 
-De `tests/` map bevat 147 tests voor alle modules:
-- `test_orchestrator.py` — deduplicatie, state/history, provider subprocess, first-wins logica
-- `test_base.py` — ProviderResult JSON contract
+De `tests/` map bevat 215 tests voor alle modules:
+- `test_orchestrator.py` — deduplicatie, state, provider subprocess, first-wins logica, provider-selectie
+- `test_orchestrator_files.py` — boekingsgeschiedenis en `last_run.json`
+- `test_base.py` — ProviderResult JSON contract, gedeelde datum/tijd-helpers, provider entry point
 - `test_notify.py` — HA push, macOS, console notificaties
-- `test_playtomic_client.py` — REST API client, token caching, auth
+- `test_playtomic_client.py` — REST API client, token caching, auth, toekomstige boekingen
 - `test_playtomic_booking.py` — slot zoeken, afstandssortering, boekingsflow
-- `test_meetandplay_booking.py` — slot filters, login, Playwright mocks
-- `test_session.py` — cookie/sessie beheer
+- `test_meetandplay_booking.py` — slot filters, login, checkout-flow, Playwright mocks
+- `test_session.py` — cookie/sessie beheer, automatisch inloggen
+- `test_fetch_bookings.py` — datum-parsing en omzetten van toekomstige boekingen
+
+### Lint
+
+```bash
+pip install ruff
+ruff check .
+```
+
+CI (`.github/workflows/test.yml`) draait bij elke push naar `main`: `ruff check .`, een controle
+of `padel_booking/` gesynchroniseerd is met de bronbestanden, en alle unit tests.
 
 ### Via Docker
 
@@ -396,9 +408,10 @@ padel-booking/
 │   ├── requirements.txt
 │   └── booking_config.yaml          # standaard booking configuratie (fallback)
 ├── orchestrator.py                  # hoofdscript — coördineert providers
+├── fetch_bookings.py                # haalt toekomstige boekingen op (future_bookings.json)
 ├── notify.py                        # notificaties (HA push + macOS + console)
 ├── providers/
-│   ├── base.py                      # ProviderResult contract (stdin/stdout JSON)
+│   ├── base.py                      # ProviderResult contract + gedeelde datum/tijd-helpers
 │   ├── meetandplay/
 │   │   ├── provider.py              # entry point subprocess
 │   │   ├── booking.py               # Playwright browser automatisering
@@ -407,6 +420,9 @@ padel-booking/
 │       ├── provider.py              # entry point subprocess
 │       ├── client.py                # REST API client
 │       └── booking.py               # boekingslogica
+├── tests/                           # unit tests (pytest)
+├── test_integration.py              # integratietest Meet & Play (vereist credentials)
+├── ruff.toml                        # lint-configuratie
 ├── config.yaml                      # booking configuratie (lokaal/dev)
 └── requirements.txt
 ```

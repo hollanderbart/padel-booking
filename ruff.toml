@@ -1,0 +1,19 @@
+# Lint-configuratie — draait in CI (`ruff check .`)
+target-version = "py312"
+# padel_booking/ bevat gesynchroniseerde kopieën van de bronbestanden (Docker build context)
+extend-exclude = [
+    "padel_booking/providers",
+    "padel_booking/orchestrator.py",
+    "padel_booking/notify.py",
+    "padel_booking/fetch_bookings.py",
+]
+
+[lint]
+select = ["E", "F", "W", "B", "SIM", "UP", "C90"]
+ignore = ["E501"]
+
+[lint.mccabe]
+max-complexity = 15
+
+[lint.per-file-ignores]
+"tests/*" = ["SIM117", "B017", "UP017"]

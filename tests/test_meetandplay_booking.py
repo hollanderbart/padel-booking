@@ -2,12 +2,12 @@
 Unit tests voor providers/meetandplay/booking.py — geen browser nodig.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from providers.meetandplay.booking import MeetAndPlayBooker, WEEKDAYS
+from providers.meetandplay.booking import MeetAndPlayBooker
 from providers.base import ProviderResult
 
 
@@ -491,3 +491,81 @@ class TestMeetAndPlayBookerRun:
 
         assert result.success is False
         assert "Chromium niet gevonden" in result.error
+
+
+# ---------------------------------------------------------------------------
+# _book_timeslot — winkelwagen → afrekenen → betaallink
+# ---------------------------------------------------------------------------
+
+def _locator(count=1, visible=True, checked=False, text="Toevoegen"):
+    loc = MagicMock()
+    loc.count.return_value = count
+    loc.first.is_visible.return_value = visible
+    loc.first.inner_text.return_value = text
+    loc.is_checked.return_value = checked
+    return loc
+
+
+class TestBookTimeslot:
+    SLOT = {"slot_id": "slot-1", "time_range": "19:30", "club_name": "Club A"}
+
+    def _make_page(self, present: dict, urls: list[str], html="Winkelwagen"):
+        """`present` mapt een substring van de selector op een locator; de rest ontbreekt."""
+        page = MagicMock()
+        page.content.return_value = html
+
+        def locator(selector):
+            for key, loc in present.items():
+                if key in selector:
+                    return loc
+            return _locator(count=0)
+
+        page.locator.side_effect = locator
+        url_iter = iter(urls)
+        current = {"url": next(url_iter)}
+        type(page).url = property(lambda self: current["url"])
+
+        def advance(*args, **kwargs):
+            current["url"] = next(url_iter, current["url"])
+
+        page.wait_for_url.side_effect = advance
+        return page
+
+    def test_ontbrekend_anker_geeft_false(self):
+        booker = _make_booker()
+        page = self._make_page({}, ["https://www.meetandplay.nl/club"])
+        assert booker._book_timeslot(page, dict(self.SLOT)) is False
+
+    def test_volledige_flow_zet_betaallink(self):
+        booker = _make_booker()
+        page = self._make_page(
+            {
+                "a.timeslot[id='slot-1']": _locator(),
+                "Toevoegen": _locator(),
+                "checkout(slot-1)": _locator(),
+                "input#tos": _locator(),
+                "Betaling starten": _locator(),
+            },
+            ["https://www.meetandplay.nl/club", "https://www.meetandplay.nl/winkelwagen", "https://pay.example/abc"],
+        )
+        slot = dict(self.SLOT)
+        assert booker._book_timeslot(page, slot) is True
+        assert slot["payment_url"] == "https://pay.example/abc"
+
+    def test_redirect_naar_login_geeft_false(self):
+        booker = _make_booker()
+        page = self._make_page(
+            {"a.timeslot[id='slot-1']": _locator(), "Toevoegen": _locator(), "checkout(slot-1)": _locator()},
+            ["https://www.meetandplay.nl/club", "https://www.meetandplay.nl/inloggen"],
+        )
+        assert booker._book_timeslot(page, dict(self.SLOT)) is False
+
+    def test_zonder_betaalknop_wordt_checkout_url_gebruikt(self):
+        booker = _make_booker()
+        page = self._make_page(
+            {"a.timeslot[id='slot-1']": _locator(), "Toevoegen": _locator(), "checkout(slot-1)": _locator()},
+            ["https://www.meetandplay.nl/club", "https://www.meetandplay.nl/winkelwagen"],
+        )
+        slot = dict(self.SLOT)
+        assert booker._book_timeslot(page, slot) is True
+        assert slot["payment_url"] == "https://www.meetandplay.nl/winkelwagen"

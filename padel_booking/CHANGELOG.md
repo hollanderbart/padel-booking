@@ -1,3 +1,17 @@
+## 2.2.11
+
+Codekwaliteit-refactor (geen nieuwe functionaliteit of configuratie-opties).
+
+- Fix: Playtomic HTTP-requests hadden geen timeout — een hangende verbinding kon de nachtelijke run onbeperkt blokkeren. Alle requests hebben nu een timeout van 30s
+- Fix: de orchestrator en de providers rekenden het zoekvenster verschillend uit wanneer vandaag de boekingsdag is (orchestrator sloeg vandaag altijd over, providers niet). Er is nu één gedeelde datumfunctie in `providers/base.py`
+- Fix: macOS-notificaties braken bij een backslash in de tekst (escaping in AppleScript)
+- Fix: CI draaide alleen `test_unit.py` en niet de `tests/` map, waardoor een falende test onopgemerkt bleef. CI draait nu alle unit tests, `ruff` lint, en controleert of `padel_booking/` gesynchroniseerd is
+- `fetch_bookings.py` gebruikt nu `PlaytomicClient` i.p.v. een eigen kopie van de login/token-cache logica
+- Grote functies opgesplitst (max. cyclomatische complexiteit 43 → 13), dubbele code verwijderd (WEEKDAYS/datumlogica, user-agent, cookiebanner, provider entry points)
+- Verouderde pre-refactor scripts verwijderd: `booking.py`, `session.py`, `run_booking.sh` (werden niet meer gebruikt of meegebouwd)
+- Ongebruikte code verwijderd: `notify_no_courts_available`, `notify_booking_error`, `notify_session_expired`, `SessionManager.manual_login`
+- 38 extra unit tests (o.a. Meet & Play checkout-flow, automatisch inloggen, `fetch_bookings.py`)
+
 ## 2.2.10
 
 - Fix: Playtomic `/v1/availability` geeft het rooster terug, niet de echte bezetting — een slot in de response betekent niet dat het vrij is. De code probeert nu een `payment_intent` aan te maken als validatie; een 4xx betekent dat het slot al bezet is en de code gaat door naar het volgende slot/club

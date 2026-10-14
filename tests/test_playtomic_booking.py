@@ -2,9 +2,8 @@
 Unit tests voor providers/playtomic/booking.py.
 """
 
-import math
-from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -364,7 +363,6 @@ class TestPlaytomicBookerRun:
 
     def test_bezet_slot_wordt_overgeslagen_bij_payment_intent_fout(self):
         """Als create_payment_intent een fout geeft, is het slot bezet — doorgaan naar volgende."""
-        import requests as req_module
         booker = _make_booker(_make_request(weeks_ahead=1))
         booker._client.search_clubs.return_value = [_make_club()]
         booker._client.get_availability.return_value = _make_availability()

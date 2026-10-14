@@ -6,28 +6,41 @@ Gebruikt de Playtomic REST API — geen browser nodig.
 import logging
 import math
 from datetime import datetime, timedelta
-from typing import Optional
 
-from providers.base import ProviderResult
+from providers.base import (
+    ProviderResult,
+    hhmm_to_minutes,
+    upcoming_booking_dates,
+    without_skip_dates,
+)
 from providers.playtomic.client import NoSuitablePaymentMethodError, PlaytomicAuthError, PlaytomicClient
 
 logger = logging.getLogger(__name__)
 
-def _format_address(address: dict) -> str:
+PROVIDER = "playtomic"
+
+
+def format_address(address: dict) -> str:
     """Formatteert een Playtomic adres-object naar een leesbare string."""
     parts = [address.get("street", ""), address.get("city", "")]
     return ", ".join(p for p in parts if p)
 
 
-WEEKDAYS = {
-    "monday": 0, "maandag": 0,
-    "tuesday": 1, "dinsdag": 1,
-    "wednesday": 2, "woensdag": 2,
-    "thursday": 3, "donderdag": 3,
-    "friday": 4, "vrijdag": 4,
-    "saturday": 5, "zaterdag": 5,
-    "sunday": 6, "zondag": 6,
-}
+def _club_coordinates(club: dict) -> tuple[float, float] | None:
+    """Lees (lat, lon) uit een club; None als onbekend of (0, 0)."""
+    geo = club.get("address", {}).get("geo_location") or club.get("geo_location") or {}
+    try:
+        lat = float(geo.get("lat") or geo.get("latitude") or 0)
+        lon = float(geo.get("lon") or geo.get("longitude") or 0)
+    except (TypeError, ValueError):
+        return None
+    if lat == 0 and lon == 0:
+        return None
+    return lat, lon
+
+
+def _failure(error: str) -> ProviderResult:
+    return ProviderResult(success=False, provider=PROVIDER, error=error)
 
 
 class PlaytomicBooker:
@@ -51,27 +64,8 @@ class PlaytomicBooker:
     # Datumberekening
     # ------------------------------------------------------------------
 
-    def _get_upcoming_booking_dates(self, count: int = 3) -> list:
-        target_day_name = self._booking["day"].lower()
-        target_weekday = WEEKDAYS.get(target_day_name)
-        if target_weekday is None:
-            raise ValueError(f"Ongeldige dag in config: {target_day_name}")
-
-        time_start_str = self._booking["time_start"]
-        target_hour, target_minute = map(int, time_start_str.split(":"))
-
-        today = datetime.now()
-        days_ahead = (target_weekday - today.weekday()) % 7
-
-        if days_ahead == 0:
-            slot_time = today.replace(
-                hour=target_hour, minute=target_minute, second=0, microsecond=0
-            )
-            if today >= slot_time:
-                days_ahead = 7
-
-        first_date = today + timedelta(days=days_ahead)
-        return [first_date + timedelta(weeks=i) for i in range(count)]
+    def _get_upcoming_booking_dates(self, count: int = 3) -> list[datetime]:
+        return upcoming_booking_dates(self._booking["day"], self._booking["time_start"], count)
 
     # ------------------------------------------------------------------
     # Afstandsberekening
@@ -89,34 +83,20 @@ class PlaytomicBooker:
     def _sort_clubs_by_distance(self, clubs: list, origin_lat: float, origin_lon: float) -> list:
         """Sorteert clubs op afstand van de opgegeven locatie (dichtstbijzijnde eerst)."""
         def distance(club: dict) -> float:
-            geo = club.get("address", {}).get("geo_location") or club.get("geo_location") or {}
-            try:
-                lat = float(geo.get("lat") or geo.get("latitude") or 0)
-                lon = float(geo.get("lon") or geo.get("longitude") or 0)
-                if lat == 0 and lon == 0:
-                    return float("inf")
-                return self._haversine_km(origin_lat, origin_lon, lat, lon)
-            except Exception:
-                return float("inf")
+            coords = _club_coordinates(club)
+            return self._haversine_km(origin_lat, origin_lon, *coords) if coords else math.inf
 
         sorted_clubs = sorted(clubs, key=distance)
         for club in sorted_clubs:
-            geo = club.get("address", {}).get("geo_location") or club.get("geo_location") or {}
-            try:
-                lat = float(geo.get("lat") or geo.get("latitude") or 0)
-                lon = float(geo.get("lon") or geo.get("longitude") or 0)
-                d = self._haversine_km(origin_lat, origin_lon, lat, lon) if lat and lon else None
-                dist_str = f"{d:.1f} km" if d is not None else "onbekend"
-            except Exception:
-                dist_str = "onbekend"
-            logger.debug("Club: %s — %s", club.get("tenant_name", "?"), dist_str)
+            d = distance(club)
+            logger.debug("Club: %s — %s", club.get("tenant_name", "?"), "onbekend" if math.isinf(d) else f"{d:.1f} km")
         return sorted_clubs
 
     # ------------------------------------------------------------------
     # Slot zoeken
     # ------------------------------------------------------------------
 
-    def _find_slot(self, tenant: dict, booking_date: datetime) -> Optional[dict]:
+    def _find_slot(self, tenant: dict, booking_date: datetime) -> dict | None:
         """
         Zoek een beschikbaar slot bij een club op de opgegeven datum.
 
@@ -124,33 +104,29 @@ class PlaytomicBooker:
             Dict met slot-info of None als er geen slot is.
         """
         tenant_id = tenant["tenant_id"]
-        time_start = self._booking["time_start"]
-        time_end = self._booking["time_end"]
         duration_minutes = int(self._booking.get("duration_minutes", 90))
         court_type = self._booking.get("court_type", "").lower()  # "indoor" of "outdoor"
 
         # Bouw resource-map op uit tenant data: resource_id → {name, type}
-        resource_map = {}
-        for r in tenant.get("resources", []):
-            resource_map[r["resource_id"]] = {
+        resource_map = {
+            r["resource_id"]: {
                 "name": r.get("name", "Padelbaan"),
                 "type": r.get("properties", {}).get("resource_type", "").lower(),
             }
+            for r in tenant.get("resources", [])
+        }
 
         start_min = booking_date.strftime("%Y-%m-%dT00:00:00")
         start_max = booking_date.strftime("%Y-%m-%dT23:59:59")
 
         try:
             slots = self._client.get_availability(tenant_id, start_min, start_max)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — één club mag de zoektocht niet afbreken
             logger.warning("Beschikbaarheid opvragen mislukt voor %s: %s", tenant.get("tenant_name"), e)
             return None
 
-        # Gewenst tijdvenster in minuten
-        start_h, start_m = map(int, time_start.split(":"))
-        end_h, end_m = map(int, time_end.split(":"))
-        window_start = start_h * 60 + start_m
-        window_end = end_h * 60 + end_m
+        window_start = hhmm_to_minutes(self._booking["time_start"])
+        window_end = hhmm_to_minutes(self._booking["time_end"])
 
         # Response structuur: lijst van court-objecten, elk met:
         #   { "resource_id": "...", "start_date": "YYYY-MM-DD", "slots": [{"start_time": "HH:MM:SS", "duration": 90, "price": "..."}, ...] }
@@ -169,31 +145,8 @@ class PlaytomicBooker:
                 )
                 continue
 
-            for slot in court.get("slots", []):
-                start_time = slot.get("start_time", "")  # "HH:MM:SS"
-                if not start_time:
-                    continue
-
-                try:
-                    h, m, _ = start_time.split(":")
-                    slot_minutes = int(h) * 60 + int(m)
-                except Exception:
-                    continue
-
-                slot_duration = slot.get("duration", 0)
-
-                logger.debug(
-                    "Slot: %s %s %s → %02d:%02d, duur=%s min",
-                    resource_name, start_date, start_time,
-                    slot_minutes // 60, slot_minutes % 60, slot_duration,
-                )
-
-                if not (window_start <= slot_minutes < window_end):
-                    continue
-
-                if slot_duration != duration_minutes:
-                    continue
-
+            start_time = self._first_matching_start(court.get("slots", []), window_start, window_end, duration_minutes)
+            if start_time:
                 full_start = f"{start_date}T{start_time}"
                 logger.info(
                     "Playtomic slot gevonden: %s — %s om %s (resource: %s, type: %s)",
@@ -202,13 +155,27 @@ class PlaytomicBooker:
                 return {
                     "tenant_id": tenant_id,
                     "tenant_name": tenant.get("tenant_name", ""),
-                    "tenant_address": _format_address(tenant.get("address", {})),
+                    "tenant_address": format_address(tenant.get("address", {})),
                     "resource_id": resource_id,
                     "resource_name": resource_name,
                     "start_time": full_start,
                     "duration_minutes": duration_minutes,
                 }
 
+        return None
+
+    @staticmethod
+    def _first_matching_start(slots: list[dict], window_start: int, window_end: int, duration: int) -> str | None:
+        """Geef de start_time ("HH:MM:SS") van het eerste slot binnen het tijdvenster met de juiste duur."""
+        for slot in slots:
+            start_time = slot.get("start_time", "")
+            try:
+                slot_minutes = hhmm_to_minutes(start_time)
+            except ValueError:
+                continue
+            logger.debug("Slot %s, duur=%s min", start_time, slot.get("duration", 0))
+            if window_start <= slot_minutes < window_end and slot.get("duration", 0) == duration:
+                return start_time
         return None
 
     # ------------------------------------------------------------------
@@ -225,33 +192,16 @@ class PlaytomicBooker:
         lon = location.get("longitude")
 
         if not lat or not lon:
-            return ProviderResult(
-                success=False,
-                provider="playtomic",
-                error="Geen latitude/longitude in config — vereist voor Playtomic",
-            )
+            return _failure("Geen latitude/longitude in config — vereist voor Playtomic")
 
         radius_km = location.get("radius_km", 20)
-        weeks_ahead = self._booking.get("weeks_ahead", 4)
-        booking_dates = self._get_upcoming_booking_dates(count=weeks_ahead)
-
-        skip_dates = set(self._booking.get("skip_dates", []))
-        if skip_dates:
-            before = len(booking_dates)
-            booking_dates = [d for d in booking_dates if d.strftime("%Y-%m-%d") not in skip_dates]
-            logger.info(
-                "skip_booked_dates: %d datum(s) overgeslagen %s",
-                before - len(booking_dates),
-                sorted(skip_dates),
-            )
-
+        booking_dates = without_skip_dates(
+            self._get_upcoming_booking_dates(count=self._booking.get("weeks_ahead", 4)),
+            self._booking.get("skip_dates", []),
+        )
         if not booking_dates:
             logger.info("Alle doeldata al geboekt — geen verdere actie nodig")
-            return ProviderResult(
-                success=False,
-                provider="playtomic",
-                error="Alle doeldata al geboekt (skip_booked_dates)",
-            )
+            return _failure("Alle doeldata al geboekt (skip_booked_dates)")
 
         logger.info(
             "Zoeken op Playtomic binnen %d km van (%.4f, %.4f)", radius_km, lat, lon
@@ -260,115 +210,103 @@ class PlaytomicBooker:
         try:
             clubs = self._client.search_clubs(lat, lon, radius_m=radius_km * 1000)
         except PlaytomicAuthError as e:
-            return ProviderResult(success=False, provider="playtomic", error=str(e))
-        except Exception as e:
-            return ProviderResult(
-                success=False,
-                provider="playtomic",
-                error=f"Clubs ophalen mislukt: {e}",
-            )
+            return _failure(str(e))
+        except Exception as e:  # noqa: BLE001
+            return _failure(f"Clubs ophalen mislukt: {e}")
 
         if not clubs:
-            return ProviderResult(
-                success=False,
-                provider="playtomic",
-                error="Geen Playtomic clubs gevonden in de regio",
-            )
+            return _failure("Geen Playtomic clubs gevonden in de regio")
 
         logger.info("%d Playtomic club(s) gevonden", len(clubs))
         clubs = self._sort_clubs_by_distance(clubs, lat, lon)
 
         for booking_date in booking_dates:
-            date_str = booking_date.strftime("%d-%m-%Y")
-            logger.info("Probeer datum: %s", date_str)
+            logger.info("Probeer datum: %s", booking_date.strftime("%d-%m-%Y"))
 
             for club in clubs:
                 slot_info = self._find_slot(club, booking_date)
                 if not slot_info:
                     continue
 
-                start_dt = datetime.fromisoformat(slot_info["start_time"])
-                time_str = start_dt.strftime("%H:%M")
-                end_dt = start_dt + timedelta(minutes=slot_info["duration_minutes"])
-                end_str = end_dt.strftime("%H:%M")
-                date_str_iso = start_dt.strftime("%Y-%m-%d")
-
-                club_url = (
-                    f"https://app.playtomic.io/tenant/{slot_info['tenant_id']}"
-                    f"?sport=PADEL&date={date_str_iso}&startTime={time_str}"
-                    f"&resourceId={slot_info['resource_id']}"
-                )
-
-                logger.info(
-                    "Kandidaat slot bij %s — %s op %s %s-%s, bevestigen via payment intent...",
-                    slot_info["tenant_name"], slot_info["resource_name"], date_str, time_str, end_str,
-                )
-
                 if self._dry_run:
                     logger.info("Dry-run: kandidaat slot gevonden maar boeking overgeslagen")
-                    return ProviderResult(
-                        success=False,
-                        provider="playtomic",
-                        error="dry_run — slot gevonden maar niet geboekt",
-                    )
+                    return _failure("dry_run — slot gevonden maar niet geboekt")
 
-                # Valideer en boek via payment intent — de availability API geeft
-                # het rooster terug, niet de echte bezetting. De payment intent
-                # geeft een 4xx als het slot al bezet is.
-                try:
-                    intent = self._client.create_payment_intent(
-                        tenant_id=slot_info["tenant_id"],
-                        resource_id=slot_info["resource_id"],
-                        start_time=slot_info["start_time"],
-                        duration_minutes=slot_info["duration_minutes"],
-                    )
-                except Exception as e:
-                    logger.info(
-                        "Slot %s %s-%s bij %s is niet beschikbaar: %s — volgende proberen",
-                        date_str, time_str, end_str, slot_info["tenant_name"], e,
-                    )
-                    continue
+                if self._book_slot(slot_info):
+                    return self._success_result(slot_info, booking_date)
 
-                intent_id = intent.get("payment_intent_id") or intent.get("id")
-                if not intent_id:
-                    logger.warning("Payment intent heeft geen ID — slot overgeslagen")
-                    continue
+        return _failure(f"Geen beschikbaar slot op Playtomic voor {len(booking_dates)} datum(s)")
 
-                try:
-                    intent_resp = self._client.set_payment_method(intent_id, intent_response=intent)
-                except NoSuitablePaymentMethodError as e:
-                    logger.info("Geen geschikte betaalmethode voor %s: %s — volgende proberen", slot_info["tenant_name"], e)
-                    continue
-                except Exception as e:
-                    logger.warning("Betaalmethode instellen mislukt voor %s: %s — volgende proberen", slot_info["tenant_name"], e)
-                    continue
+    def _book_slot(self, slot_info: dict) -> bool:
+        """
+        Valideer en boek via payment intent — de availability API geeft het
+        rooster terug, niet de echte bezetting. De payment intent geeft een
+        4xx als het slot al bezet is. Geeft True terug als de boeking bevestigd is.
+        """
+        club = slot_info["tenant_name"]
+        start_dt = datetime.fromisoformat(slot_info["start_time"])
+        end_dt = start_dt + timedelta(minutes=slot_info["duration_minutes"])
+        when = f"{start_dt:%d-%m-%Y %H:%M}-{end_dt:%H:%M}"
 
-                try:
-                    self._client.confirm_booking(intent_id)
-                except Exception as e:
-                    logger.warning("Boeking bevestigen mislukt voor %s: %s — volgende proberen", slot_info["tenant_name"], e)
-                    continue
+        logger.info(
+            "Kandidaat slot bij %s — %s op %s, bevestigen via payment intent...",
+            club, slot_info["resource_name"], when,
+        )
 
-                logger.info(
-                    "Boeking bevestigd bij %s op %s %s-%s",
-                    slot_info["tenant_name"], date_str, time_str, end_str,
-                )
+        try:
+            intent = self._client.create_payment_intent(
+                tenant_id=slot_info["tenant_id"],
+                resource_id=slot_info["resource_id"],
+                start_time=slot_info["start_time"],
+                duration_minutes=slot_info["duration_minutes"],
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.info("Slot %s bij %s is niet beschikbaar: %s — volgende proberen", when, club, e)
+            return False
 
-                return ProviderResult(
-                    success=True,
-                    provider="playtomic",
-                    booked_date=booking_date.strftime("%Y-%m-%d"),
-                    slot_info={
-                        "club_name": slot_info["tenant_name"],
-                        "club_address": slot_info["tenant_address"],
-                        "court_name": slot_info["resource_name"],
-                        "time_range": f"{time_str} - {end_str} ({slot_info['duration_minutes']} minuten)",
-                        "payment_url": club_url,
-                    },
-                )
+        intent_id = intent.get("payment_intent_id") or intent.get("id")
+        if not intent_id:
+            logger.warning("Payment intent heeft geen ID — slot overgeslagen")
+            return False
 
+        try:
+            self._client.set_payment_method(intent_id, intent_response=intent)
+        except NoSuitablePaymentMethodError as e:
+            logger.info("Geen geschikte betaalmethode voor %s: %s — volgende proberen", club, e)
+            return False
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Betaalmethode instellen mislukt voor %s: %s — volgende proberen", club, e)
+            return False
+
+        try:
+            self._client.confirm_booking(intent_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Boeking bevestigen mislukt voor %s: %s — volgende proberen", club, e)
+            return False
+
+        logger.info("Boeking bevestigd bij %s op %s", club, when)
+        return True
+
+    @staticmethod
+    def _success_result(slot_info: dict, booking_date: datetime) -> ProviderResult:
+        start_dt = datetime.fromisoformat(slot_info["start_time"])
+        end_dt = start_dt + timedelta(minutes=slot_info["duration_minutes"])
+        club_url = (
+            f"https://app.playtomic.io/tenant/{slot_info['tenant_id']}"
+            f"?sport=PADEL&date={start_dt:%Y-%m-%d}&startTime={start_dt:%H:%M}"
+            f"&resourceId={slot_info['resource_id']}"
+        )
         return ProviderResult(
-            success=False,
-            provider="playtomic",
-            error=f"Geen beschikbaar slot op Playtomic voor {len(booking_dates)} datum(s)",
+            success=True,
+            provider=PROVIDER,
+            booked_date=booking_date.strftime("%Y-%m-%d"),
+            slot_info={
+                "club_name": slot_info["tenant_name"],
+                "club_address": slot_info["tenant_address"],
+                "court_name": slot_info["resource_name"],
+                "time_range": (
+                    f"{start_dt:%H:%M} - {end_dt:%H:%M} ({slot_info['duration_minutes']} minuten)"
+                ),
+                "payment_url": club_url,
+            },
         )
