@@ -104,6 +104,10 @@ actief, dan doet `addon_start` niets.
 - **Trigger**: Time → `00:00:30`
 - **Action**: Call service → `hassio.addon_start` → `addon: local_padel_booking`
 
+> De slug hangt af van de installatie: via de GitHub-repository is het `<hash>_padel_booking`
+> (bijv. `a30a93bf_padel_booking`), alleen bij een lokale installatie `local_padel_booking`.
+> Zie [Logs en status uitlezen via SSH](#logs-en-status-uitlezen-via-ssh) om de slug op te zoeken.
+
 Of voeg dit toe aan `automations.yaml`:
 
 ```yaml
@@ -465,6 +469,49 @@ Mogelijke oorzaken:
 
 - Controleer `ha_notify_device_id` in de Configuration tab
 - Zoek de juiste device ID via **Developer Tools → Actions → `notify.mobile_app`**
+
+### Logs en status uitlezen via SSH
+
+De HA MCP-server (Assist) geeft geen toegang tot addon-logs. Via SSH kan dat wel, ook vanaf je
+eigen machine (bijv. voor Claude Code):
+
+1. Maak een SSH-sleutel zonder wachtwoord (zodat scripts hem kunnen gebruiken):
+   ```bash
+   ssh-keygen -t ed25519 -C "jij@example.com" -f ~/.ssh/id_ed25519_ha -N ""
+   cat ~/.ssh/id_ed25519_ha.pub
+   ```
+2. Installeer de **Terminal & SSH** addon (Settings → Add-ons → Add-on Store)
+3. Op de **Configuration** tab:
+   - plak de publieke sleutel in `authorized_keys` — in de formulierweergave alléén de sleutelregel, zonder `- ` ervoor
+   - vul bij **Network** poort `22` in; die kaart heeft een **eigen Save-knop**
+   - is de Save-knop grijs, dan klopt de configuratie niet (bijv. een afgebroken sleutelregel)
+4. **Herstart** de SSH addon. Pas daarna luistert sshd (zonder poort luistert hij helemaal niet:
+   `Connection refused`)
+
+Daarna:
+
+```bash
+SSH="ssh -i ~/.ssh/id_ed25519_ha -o IdentitiesOnly=yes root@homeassistant.local"
+
+# Slug opzoeken — bij installatie via de GitHub-repository is dat <hash>_padel_booking,
+# alleen bij een lokale installatie is het local_padel_booking
+$SSH "ha apps list"
+
+# Logs van de laatste (of lopende) run
+$SSH "ha apps logs <slug>"
+
+# Status, versie en opties (wachtwoorden weggefilterd); de host heeft geen python3, wel jq
+$SSH "ha apps info <slug> --raw-json | jq '.data | {state, boot, watchdog, version, options: (.options | with_entries(select(.key|test(\"pass\")|not)))}'"
+
+# State-bestanden
+$SSH "cat /config/padel/last_run.json /config/padel/booking_history.json"
+```
+
+Op oudere HA-versies heet het commando `ha addons` in plaats van `ha apps`.
+
+Let op: in `schedule_mode: smart` hoort de addon **continu** te draaien (`state: started`). Staat hij op
+`stopped`, dan worden de vrijgavemomenten gemist. Na een update van een gestopte addon start HA hem niet
+vanzelf; start hem dan handmatig (`ha apps start <slug>`) en zet eventueel de watchdog aan.
 
 ---
 
