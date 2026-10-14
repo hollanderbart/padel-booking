@@ -86,11 +86,12 @@ def enabled_providers(config: dict) -> list[tuple[ProviderSpec, dict, dict]]:
     result = []
     for spec in PROVIDERS:
         cfg = providers_config.get(spec.name, {})
-        if spec.disabled_reason:
-            logger.warning("Provider '%s' tijdelijk uitgeschakeld: %s", spec.name, spec.disabled_reason)
-            continue
+        # Eerst de eigen instelling: staat de provider uit, dan is de reden van een noodstop niet relevant
         if not cfg.get("enabled", spec.enabled_by_default):
             logger.info("Provider '%s' uitgeschakeld", spec.name)
+            continue
+        if spec.disabled_reason:
+            logger.warning("Provider '%s' tijdelijk uitgeschakeld: %s", spec.name, spec.disabled_reason)
             continue
         logger.info("Provider '%s' ingeschakeld", spec.name)
         credentials = {

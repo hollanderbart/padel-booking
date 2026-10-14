@@ -432,7 +432,8 @@ Bij de upgrade van v1 (knltb_padel_booking) naar v2 (padel_booking) moet je:
 - Als je Playtomic account via Google/Apple SSO is aangemaakt, stel dan eerst een wachtwoord in via "Wachtwoord vergeten" op playtomic.io
 - Bekend probleem (oktober 2026): de API-host `api.playtomic.io` heeft geen DNS-record meer. Fouten als
   `Could not resolve host` / `NameResolutionError` in de log komen daardoor. Daarom is de Playtomic provider
-  sinds v2.3.1 tijdelijk uitgeschakeld (`disabled_reason` in `orchestrator.py`), ongeacht `playtomic_enabled`
+  sinds v2.3.1 tijdelijk uitgeschakeld (`disabled_reason` in `orchestrator.py`), ook als `playtomic_enabled` aan staat.
+  Sinds v2.6.2 verschijnt de waarschuwing hierover alleen nog als je `playtomic_enabled` aanzet
 
 ### Script vindt geen banen terwijl er wel slots beschikbaar zijn
 

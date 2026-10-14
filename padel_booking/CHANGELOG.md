@@ -1,3 +1,7 @@
+## 2.6.2
+
+- Fix: met `playtomic_enabled: false` logde elke run toch "Provider 'playtomic' tijdelijk uitgeschakeld: … (DNS)". De eigen aan/uit-instelling wordt nu eerst gecontroleerd; de DNS-waarschuwing verschijnt alleen nog als je Playtomic aanzet
+
 ## 2.6.1
 
 - Fix (Meet & Play): een `location_radius_km` die niet in de afstand-dropdown staat (bijv. 15) liet elke run vastlopen op een timeout. De straal wordt nu afgerond naar de grootste toegestane waarde die niet verder zoekt (5, 10, 20, 50, 100, 150, 200 km), met een waarschuwing in de log
