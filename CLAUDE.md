@@ -106,5 +106,28 @@ Sessiepersistentie draait via `/config/padel/` (volume map `config:rw`):
 /config/padel/last_run.json               # laatste run status
 ```
 
-**HA automation na hernoemen:**
-De automation moet `addon: local_padel_booking` gebruiken (was `local_knltb_padel_booking`).
+**Addon slug:**
+De addon is geïnstalleerd via de GitHub-repository, dus de slug is `a30a93bf_padel_booking`
+(niet `local_padel_booking` — dat geldt alleen voor een lokale installatie). Automations en
+`ha apps`-commando's moeten deze slug gebruiken.
+
+## Logs en status ophalen van de HA host
+
+De `home-assistant` MCP-server geeft alleen Assist-tools (geen logs). Gebruik SSH via de
+**Terminal & SSH** addon (`core_ssh`, poort 22). De sleutel `~/.ssh/id_ed25519_ha` (zonder
+wachtwoord) staat in `authorized_keys`, dus non-interactief werkt:
+
+```bash
+SSH="ssh -i ~/.ssh/id_ed25519_ha -o IdentitiesOnly=yes -o BatchMode=yes root@homeassistant.local"
+
+$SSH "ha apps logs a30a93bf_padel_booking"            # log van de laatste/lopende run
+$SSH "ha apps info a30a93bf_padel_booking --raw-json | jq '.data | {state, boot, watchdog, version}'"
+$SSH "ha apps list"                                   # alle addons + slugs
+$SSH "cat /config/padel/last_run.json"                # state-bestanden
+```
+
+- Host heeft **geen python3** — gebruik `jq` voor JSON
+- Gebruik `ha apps …`; `ha addons …` is de oude naam
+- Filter wachtwoorden uit `options` voordat je ze toont
+- `Connection refused` → SSH addon draait niet of heeft geen poort ingesteld (Network-kaart, eigen Save-knop, daarna herstarten)
+- In `schedule_mode: smart` hoort de addon `started` te zijn; `stopped` betekent dat vrijgavemomenten gemist worden. Start of herstart de addon niet zonder het eerst te vragen

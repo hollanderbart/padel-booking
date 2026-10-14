@@ -1,3 +1,8 @@
+## 2.4.2
+
+- Docs: logs en status van de addon uitlezen via SSH (Terminal & SSH addon, `ha apps logs <slug>`) — de HA MCP-server geeft geen toegang tot addon-logs
+- Docs: de addon-slug is `<hash>_padel_booking` bij installatie via de GitHub-repository (alleen `local_padel_booking` bij een lokale installatie)
+
 ## 2.4.1
 
 - Standaard `weeks_ahead` van 4 naar 5, zodat clubs met een boekingsvenster van ~30 dagen (Tennis en Padel Meerzicht, TERWEGEN INDOOR) op hun vrijgavemoment geboekt worden. Bestaande installaties: pas de optie aan in de addon-configuratie in HA
