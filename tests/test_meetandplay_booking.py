@@ -497,12 +497,17 @@ class TestMeetAndPlayBookerRun:
 # _book_timeslot — winkelwagen → afrekenen → betaallink
 # ---------------------------------------------------------------------------
 
-def _locator(count=1, visible=True, checked=False, text="Toevoegen"):
+def _locator(count=1, visible=True, checked=False, text="Toevoegen", inner=None):
     loc = MagicMock()
     loc.count.return_value = count
     loc.first.is_visible.return_value = visible
     loc.first.inner_text.return_value = text
     loc.is_checked.return_value = checked
+    # Locators binnen dit element (bijv. de eigen 'Toevoegen'-knop van een slot); standaard geen
+    if inner is None:
+        inner = MagicMock()
+        inner.count.return_value = 0
+    loc.first.locator.return_value = inner
     return loc
 
 
@@ -569,3 +574,99 @@ class TestBookTimeslot:
         slot = dict(self.SLOT)
         assert booker._book_timeslot(page, slot) is True
         assert slot["payment_url"] == "https://www.meetandplay.nl/winkelwagen"
+
+
+class TestAddToCartEigenKnop:
+    def test_klikt_de_knop_van_het_gekozen_slot(self):
+        booker = _make_booker()
+        own_button = _locator()
+        page_button = _locator()
+        page = MagicMock()
+        page.locator.side_effect = lambda sel: (
+            _locator(inner=own_button) if "slot-1" in sel else page_button
+        )
+
+        assert booker._add_to_cart(page, "slot-1") is True
+        own_button.first.click.assert_called_once()
+        page_button.first.click.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Huidige paginalayout: Tijdstip-kiezer en duur-knoppen
+# ---------------------------------------------------------------------------
+
+class TestTijdstipKiezer:
+    """De slotlijst toont alleen de geselecteerde starttijd; de kiezer bevat alle beschikbare tijden."""
+
+    def _slot(self, start, slot_id):
+        slot = MagicMock()
+        slot.evaluate.return_value = "binnen • dubbelspel"
+        slot.get_attribute.return_value = slot_id
+        texts = {"timeslot-time": f"{start} - 21:00 90 minuten", "timeslot-name": "Padelbaan 1"}
+        slot.locator.side_effect = lambda sel: MagicMock(
+            first=MagicMock(inner_text=MagicMock(return_value=next(v for k, v in texts.items() if k in sel)))
+        )
+        return slot
+
+    def _page(self, times):
+        state = {"selected": times[0], "clicked": []}
+        page = MagicMock()
+        page.content.return_value = ""
+
+        def locator(sel):
+            loc = MagicMock()
+            if sel == 'input[name="time"]':
+                loc.count.return_value = len(times)
+                loc.evaluate_all.return_value = times
+            elif sel.startswith('label[for="time-'):
+                value = sel.split("time-")[1].split('"')[0]
+
+                def click():
+                    state["selected"] = value
+                    state["clicked"].append(value)
+
+                loc.click.side_effect = click
+            elif "timeslot-container" in sel:
+                loc.count.side_effect = lambda: 1
+                loc.nth.side_effect = lambda i: self._slot(state["selected"], f"id-{state['selected']}")
+            else:
+                loc.count.return_value = 0
+            return loc
+
+        page.locator.side_effect = locator
+        return page, state
+
+    def test_kiest_starttijd_binnen_venster_ook_als_eerste_tijd_ervoor_ligt(self):
+        booker = _make_booker(_make_request(time_start="19:30", time_end="21:00"))
+        page, state = self._page(["18:00", "19:30", "20:00"])
+
+        result = booker._find_timeslot(page, {"name": "Club", "url": "https://x", "address": "Straat"})
+
+        assert result["slot_id"] == "id-19:30"
+        assert state["clicked"] == ["19:30"]
+
+    def test_geen_starttijd_in_venster(self):
+        booker = _make_booker(_make_request(time_start="19:30", time_end="21:00"))
+        page, state = self._page(["09:00", "18:00"])
+
+        assert booker._find_timeslot(page, {"name": "Club", "url": "https://x", "address": "Straat"}) is None
+        assert state["clicked"] == []
+
+
+class TestSelectDuration:
+    def _page(self, pill_class):
+        pill = _locator()
+        pill.first.get_attribute.return_value = pill_class
+        page = MagicMock()
+        page.locator.side_effect = lambda sel: pill if "toggleDuration(90)" in sel else _locator(count=0)
+        return page, pill
+
+    def test_klikt_inactieve_duurknop(self):
+        page, pill = self._page("badge rounded-pill pill inactive ")
+        MeetAndPlayBooker._select_duration(page, 90)
+        pill.first.click.assert_called_once()
+
+    def test_actieve_duurknop_niet_nogmaals_klikken(self):
+        page, pill = self._page("badge rounded-pill pill active")
+        MeetAndPlayBooker._select_duration(page, 90)
+        pill.first.click.assert_not_called()

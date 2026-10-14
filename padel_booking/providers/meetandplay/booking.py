@@ -24,6 +24,7 @@ PROVIDER = "meetandplay"
 SEARCH_URL = "https://www.meetandplay.nl/zoeken"
 PADEL_SPORT_ID = "2"
 
+START_TIME_SELECTOR = 'input[name="time"]'
 CHECKOUT_URL_KEYWORDS = ["reserveren", "winkelwagen", "payment", "checkout", "betaling", "betalen", "order", "bestelling"]
 LIVEWIRE_DATE_RE = re.compile(r"window\.Livewire\.find\('([^']+)'\)\.set\('date'")
 SLOT_LABEL_JS = """el => {
@@ -182,16 +183,52 @@ class MeetAndPlayBooker:
                 indoor_select.select_option("INDOOR")
                 page.wait_for_timeout(1500)
 
-        daypart_select = page.locator("select#dayPart")
-        if daypart_select.count() > 0:
-            daypart_select.select_option("evening")
-            page.wait_for_timeout(1500)
+        self._select_duration(page, duration_minutes)
 
+    @staticmethod
+    def _select_duration(page: Page, duration_minutes: int) -> None:
+        """Zet het duurfilter: knoppen ("60 minuten") op de huidige pagina, dropdown op de oude."""
         duration_select = page.locator("select#duration")
         if duration_select.count() > 0:
             duration_select.select_option(str(duration_minutes))
             page.wait_for_timeout(1500)
             logger.info("Duur ingesteld op %d minuten", duration_minutes)
+            return
+
+        pill = page.locator(f'.pill[wire\\:click="toggleDuration({duration_minutes})"]')
+        if pill.count() == 0:
+            logger.info("Geen duurfilter voor %d minuten op deze pagina — duur wordt per slot gecontroleerd", duration_minutes)
+            return
+        if "inactive" in (pill.first.get_attribute("class") or ""):
+            pill.first.click()
+            page.wait_for_timeout(1500)
+        logger.info("Duur ingesteld op %d minuten", duration_minutes)
+
+    @staticmethod
+    def _available_start_times(page: Page) -> list[str] | None:
+        """
+        Starttijden uit de "Tijdstip"-kiezer — precies de tijden die die dag nog beschikbaar zijn.
+        None als de pagina geen kiezer heeft (dan staan alle slots direct op de pagina).
+        """
+        radios = page.locator(START_TIME_SELECTOR)
+        if radios.count() == 0:
+            return None
+        return radios.evaluate_all("els => els.map(e => e.value)")
+
+    @staticmethod
+    def _select_start_time(page: Page, start_time: str) -> None:
+        # De radio zelf is visueel verborgen (Bootstrap btn-check); klik het bijbehorende label
+        page.locator(f'label[for="time-{start_time}"]').click()
+        page.wait_for_timeout(2000)
+
+    def _match_listed_slots(self, page: Page, club: dict, duration_minutes: int) -> dict | None:
+        slots = page.locator(".timeslot-container a.timeslot")
+        logger.info("%d tijdslot(en) gevonden bij %s", slots.count(), club["name"])
+        for i in range(slots.count()):
+            slot_info = self._match_slot(slots.nth(i), i, club, duration_minutes)
+            if slot_info:
+                return slot_info
+        return None
 
     def _label_skip_reason(self, label: str) -> str | None:
         """Geef een reden als het baanlabel niet past bij court_type/game_type."""
@@ -272,16 +309,28 @@ class MeetAndPlayBooker:
         self._apply_club_filters(page, duration_minutes)
         self._set_livewire_date(page, date_str)
 
-        slots = page.locator(".timeslot-container a.timeslot")
-        logger.info("%d tijdslot(en) gevonden bij %s", slots.count(), club["name"])
+        start_times = self._available_start_times(page)
+        if start_times is None:
+            slot_info = self._match_listed_slots(page, club, duration_minutes)
+        else:
+            # De slotlijst toont alleen de geselecteerde starttijd: loop alle tijden in het venster af
+            window_start = hhmm_to_minutes(self._booking["time_start"])
+            window_end = hhmm_to_minutes(self._booking["time_end"])
+            in_window = [t for t in start_times if window_start <= hhmm_to_minutes(t) < window_end]
+            logger.info(
+                "Beschikbare starttijden bij %s: %s — binnen venster: %s",
+                club["name"], ", ".join(start_times) or "geen", ", ".join(in_window) or "geen",
+            )
+            slot_info = None
+            for start_time in in_window:
+                self._select_start_time(page, start_time)
+                slot_info = self._match_listed_slots(page, club, duration_minutes)
+                if slot_info:
+                    break
 
-        for i in range(slots.count()):
-            slot_info = self._match_slot(slots.nth(i), i, club, duration_minutes)
-            if slot_info:
-                return slot_info
-
-        logger.info("Geen geschikt tijdslot gevonden bij %s", club["name"])
-        return None
+        if not slot_info:
+            logger.info("Geen geschikt tijdslot gevonden bij %s", club["name"])
+        return slot_info
 
     # ------------------------------------------------------------------
     # Boeking afronden
@@ -296,11 +345,10 @@ class MeetAndPlayBooker:
         slot_anchor.first.click()
         page.wait_for_timeout(2000)
 
-        add_btn = _first_present(page, [
-            'button:has-text("Toevoegen")',
-            'button:has-text("Reserveren")',
-            'button:has-text("Boeken")',
-        ])
+        # Elk slot heeft een eigen knop; klik die van dit slot, niet de eerste op de pagina
+        add_selector = 'button:has-text("Toevoegen"), button:has-text("Reserveren"), button:has-text("Boeken")'
+        own_btn = slot_anchor.first.locator(add_selector)
+        add_btn = own_btn if own_btn.count() > 0 else _first_present(page, add_selector.split(", "))
         if add_btn is None:
             logger.warning("'Toevoegen'/'Reserveren'/'Boeken'-knop niet gevonden na klik op tijdslot %s", slot_id)
             return False
