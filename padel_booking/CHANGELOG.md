@@ -1,3 +1,7 @@
+## 2.3.3
+
+- Fix (booking research): starttijden worden nu uit de "Tijdstip"-kiezer op de clubpagina gelezen. Die bevat alle nog beschikbare starttijden van een dag; de slotlijst toont alleen de eerste tijd
+
 ## 2.3.2
 
 - Fix (booking research): de Meet & Play clubpagina toont per keer slots van één starttijd, waardoor "laatste slot op de horizon-dag" niets zei over rollend vs. hele-dag release. Zulke observaties tellen niet meer mee voor die conclusie (het venster in dagen blijft wel geldig)

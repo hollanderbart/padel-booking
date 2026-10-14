@@ -336,8 +336,10 @@ def _probe_club(page, booker, club: dict, observed_at: datetime, snapshot_dir: P
         day = observed_at.date() + timedelta(days=offset)
         if not booker._set_livewire_date(page, day.strftime("%d-%m-%Y")):
             raise RuntimeError("Livewire datum-component niet gevonden op clubpagina")
-        texts = page.locator(".timeslot-container a.timeslot .timeslot-time").all_inner_texts()
-        return [m.group(0) for t in texts if (m := TIME_RE.search(t))]
+        # De "Tijdstip"-kiezer bevat precies de starttijden die die dag nog beschikbaar zijn;
+        # de slotlijst eronder toont alleen de eerst geselecteerde tijd.
+        values = page.locator('input[name="time"]').evaluate_all("els => els.map(e => e.value)")
+        return [m.group(0) for v in values if (m := TIME_RE.search(v))]
 
     summary = summarize_scan(observed_at, scan_days(probe_day))
     if snapshot_dir is not None:
