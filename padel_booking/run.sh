@@ -1,29 +1,36 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 # Zet /data/options.json om naar /app/.env en /app/config.yaml
 python3 /app/options_to_config.py
 
-# Zorg dat de config directory bestaat voordat het script draait
+# Sessiebestanden, state en club-schema staan in /config/padel (blijft bewaard tussen runs/updates)
 mkdir -p /config/padel
-
-# Herstel provider sessie-bestanden als aanwezig
-[ -f /config/padel/.meetandplay_cookies.json ] && \
-    cp /config/padel/.meetandplay_cookies.json /data/.meetandplay_cookies.json
-[ -f /config/padel/.playtomic_token.json ] && \
-    cp /config/padel/.playtomic_token.json /data/.playtomic_token.json
+# Eenmalige migratie: oudere versies bewaarden de sessiebestanden in /data
+for f in .meetandplay_cookies.json .playtomic_token.json; do
+    if [ -f "/data/$f" ] && [ ! -f "/config/padel/$f" ]; then
+        cp "/data/$f" "/config/padel/$f"
+    fi
+done
 
 cd /app
-python orchestrator.py --debug
 
-# Persisteer provider sessie-bestanden zodat ze bewaard blijven tussen runs
-[ -f /data/.meetandplay_cookies.json ] && \
-    cp /data/.meetandplay_cookies.json /config/padel/.meetandplay_cookies.json
-[ -f /data/.playtomic_token.json ] && \
-    cp /data/.playtomic_token.json /config/padel/.playtomic_token.json
+MODE=$(python3 -c "
+import yaml
+cfg = yaml.safe_load(open('config.yaml'))
+print(cfg.get('schedule', {}).get('mode', 'smart'))
+" 2>/dev/null || echo "smart")
+
+if [ "$MODE" = "smart" ]; then
+    # Draait continu: start de booker op de vrijgavemomenten van de clubs + nachtelijke run
+    exec python scheduler.py --debug
+fi
+
+# nightly: één run per start van de addon (bijv. via een HA automation om 00:01).
+# Exit code 1 betekent "geen boeking gemaakt" en mag het script niet afbreken.
+python orchestrator.py --debug || echo "Geen boeking gemaakt (exit $?)"
 
 # Haal toekomstige boekingen op en schrijf naar /config/padel/future_bookings.json
-# (alleen als fetch_bookings_enabled: true in de configuratie)
 FETCH_ENABLED=$(python3 -c "
 import yaml
 cfg = yaml.safe_load(open('config.yaml'))

@@ -25,7 +25,7 @@ jobs:
 
       - name: Controleer sync naar padel_booking/
         run: |
-          for f in orchestrator.py notify.py fetch_bookings.py; do diff -q "$f" "padel_booking/$f"; done
+          for f in orchestrator.py notify.py fetch_bookings.py scheduler.py; do diff -q "$f" "padel_booking/$f"; done
           diff -rq --exclude=__pycache__ providers padel_booking/providers
 
       - name: Draai unit tests

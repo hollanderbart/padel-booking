@@ -1,5 +1,5 @@
 name: "Padel Booking"
-version: "2.3.4"
+version: "2.4.0"
 slug: "padel_booking"
 description: "Automatisch padelbanen boeken op meetandplay.nl en Playtomic"
 arch:
@@ -31,6 +31,7 @@ options:
   playtomic_enabled: false
   fetch_bookings_enabled: true
   skip_booked_dates: true
+  schedule_mode: "smart"
 
 schema:
   knltb_email: email
@@ -53,3 +54,4 @@ schema:
   playtomic_enabled: bool
   fetch_bookings_enabled: bool
   skip_booked_dates: bool
+  schedule_mode: list(smart|nightly)

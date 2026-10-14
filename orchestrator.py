@@ -9,8 +9,10 @@ Gebruik:
   python orchestrator.py
   python orchestrator.py --debug
   python orchestrator.py --dry-run
+  python orchestrator.py --target '{"dates": ["2026-10-22"], "clubs": [{"name": "...", "url": "...", "address": "..."}]}'
 """
 
+import argparse
 import asyncio
 import json
 import logging
@@ -315,9 +317,21 @@ def load_future_booking_dates(future_bookings_file: Path) -> set[str]:
 # Hoofdflow
 # ---------------------------------------------------------------------------
 
-def build_provider_request(config: dict, credentials: dict, provider_config: dict, dry_run: bool, skip_dates: set[str] | None = None) -> dict:
-    """Stel het request samen dat naar een provider subprocess gestuurd wordt."""
-    return {
+def build_provider_request(
+    config: dict,
+    credentials: dict,
+    provider_config: dict,
+    dry_run: bool,
+    skip_dates: set[str] | None = None,
+    target: dict | None = None,
+) -> dict:
+    """
+    Stel het request samen dat naar een provider subprocess gestuurd wordt.
+
+    `target` (gerichte run door scheduler.py) beperkt de zoektocht tot
+    {"dates": ["YYYY-MM-DD", ...], "clubs": [{"name", "url", "address"}, ...]}.
+    """
+    request = {
         "booking_request": {
             "location": config["location"],
             "day": config["booking"]["day"],
@@ -333,6 +347,28 @@ def build_provider_request(config: dict, credentials: dict, provider_config: dic
         "provider_config": provider_config,
         "dry_run": dry_run,
     }
+    if target:
+        request["booking_request"]["only_dates"] = list(target.get("dates", []))
+        request["booking_request"]["clubs"] = list(target.get("clubs", []))
+    return request
+
+
+def _state_booked_date(state_file: Path) -> str | None:
+    try:
+        with open(state_file, encoding="utf-8") as f:
+            return json.load(f).get("booked_date")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _remaining_target(target: dict, skip_dates: set[str], state_file: Path) -> dict | None:
+    """Haal datums die al geboekt zijn uit een gerichte run; None als er niets overblijft."""
+    booked = skip_dates | {d for d in [_state_booked_date(state_file)] if d}
+    dates = [d for d in target.get("dates", []) if d not in booked]
+    if not dates:
+        logger.info("Gerichte run overgeslagen — %s al geboekt", ", ".join(target.get("dates", [])))
+        return None
+    return {**target, "dates": dates}
 
 
 def _load_skip_dates(config: dict) -> set[str]:
@@ -362,7 +398,7 @@ def _print_summary(provider: str, slot_info: dict) -> None:
     print("=" * 60 + "\n")
 
 
-async def main_async(debug: bool, dry_run: bool) -> int:
+async def main_async(debug: bool, dry_run: bool, target: dict | None = None) -> int:
     load_dotenv()
 
     config = load_config()
@@ -376,14 +412,23 @@ async def main_async(debug: bool, dry_run: bool) -> int:
     logger.info("Padel Booking Orchestrator gestart")
     logger.info("=" * 60)
 
-    if not dry_run and is_already_booked(state_file, config.get("booking", {})):
+    skip_dates = _load_skip_dates(config)
+    providers = enabled_providers(config)
+
+    if target:
+        logger.info("Gerichte run: %s bij %s", ", ".join(target.get("dates", [])),
+                    ", ".join(c.get("name", "?") for c in target.get("clubs", [])) or "alle clubs")
+        target = _remaining_target(target, skip_dates, state_file)
+        if target is None:
+            return 0
+        providers = [p for p in providers if p[0].name == target.get("provider", "meetandplay")]
+    elif not dry_run and is_already_booked(state_file, config.get("booking", {})):
         write_last_run(last_run_file, success=True)
         return 0
 
-    skip_dates = _load_skip_dates(config)
     provider_requests = [
-        (spec.name, build_provider_request(config, credentials, provider_cfg, dry_run, skip_dates))
-        for spec, credentials, provider_cfg in enabled_providers(config)
+        (spec.name, build_provider_request(config, credentials, provider_cfg, dry_run, skip_dates, target))
+        for spec, credentials, provider_cfg in providers
     ]
 
     if not provider_requests:
@@ -421,11 +466,17 @@ async def main_async(debug: bool, dry_run: bool) -> int:
 
 
 def main() -> None:
-    debug = "--debug" in sys.argv
-    dry_run = "--dry-run" in sys.argv
-    setup_logging(debug)
+    parser = argparse.ArgumentParser(description="Padel Booking Orchestrator")
+    parser.add_argument("--debug", action="store_true", help="Verbose logging")
+    parser.add_argument("--dry-run", action="store_true", help="Zoek slots maar boek niet")
+    parser.add_argument(
+        "--target", type=json.loads, default=None,
+        help='Gerichte run (JSON): {"dates": ["YYYY-MM-DD"], "clubs": [{"name", "url", "address"}]}',
+    )
+    args = parser.parse_args()
+    setup_logging(args.debug)
 
-    exit_code = asyncio.run(main_async(debug=debug, dry_run=dry_run))
+    exit_code = asyncio.run(main_async(debug=args.debug, dry_run=args.dry_run, target=args.target))
     sys.exit(exit_code)
 
 
