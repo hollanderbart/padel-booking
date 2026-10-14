@@ -60,7 +60,7 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 | `knltb_password` | Wachtwoord van je KNLTB account |
 | `ha_notify_device_id` | Device ID voor push notificaties (optioneel) |
 | `location_city` | Stad om clubs in te zoeken (bijv. `Boskoop`) |
-| `location_radius_km` | Zoekradius in kilometers |
+| `location_radius_km` | Zoekradius in kilometers (hemelsbreed). Meet & Play kent alleen 5, 10, 20, 50, 100, 150 en 200 km; een andere waarde wordt naar beneden afgerond (bijv. 15 → 10) |
 | `location_latitude` | Breedtegraad voor Playtomic zoeken (bijv. `52.07`) |
 | `location_longitude` | Lengtegraad voor Playtomic zoeken (bijv. `4.66`) |
 | `booking_days` | Eén of meer weekdagen om te boeken, bijv. `thursday` of `tuesday` + `thursday` (standaard `thursday`). Vervangt `booking_day` uit versies vóór 2.5.0 — na de update staat `booking_days` op `thursday`; controleer dit als je een andere dag had |

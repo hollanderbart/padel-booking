@@ -800,3 +800,12 @@ class TestGerichteRun:
 
         search.assert_not_called()
         assert find.call_args[0][1]["name"] == "Club A"
+
+
+class TestDistanceOption:
+    @pytest.mark.parametrize("radius,expected", [
+        (10, "10"), (20, "20"), (15, "10"), (3, "5"), (75, "50"), ("20", "20"), (1000, "400"),
+    ])
+    def test_kiest_grootste_toegestane_straal(self, radius, expected):
+        from providers.meetandplay.booking import _distance_option
+        assert _distance_option(radius) == expected
