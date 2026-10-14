@@ -1,3 +1,8 @@
+## 2.5.1
+
+- Fix (Meet & Play): enkelspelbanen werden geboekt bij `game_type: double` als "single" alleen in de baannaam stond (bijv. "Padelhal | Baan 5 (SINGLE | max. 2 spelers)"). De baannaam wordt nu ook gecontroleerd
+- Fix (Meet & Play): een tweede boeking in dezelfde run liep vast op de pop-up "Je reservering bij …" — Meet & Play staat per sessie één openstaande reservering toe. De booker kiest nu "Annuleren" (niet "Doorgaan", dat laat de vorige reservering en betaallink vervallen) en boekt verder in een nieuwe sessie
+
 ## 2.5.0
 
 - Feature: meerdere weekdagen — nieuwe optie `booking_days` (lijst, bijv. dinsdag + donderdag) vervangt `booking_day`. Na de update staat `booking_days` op `thursday` (de standaardwaarde); had je een andere `booking_day`, pas `booking_days` dan aan in de addon-configuratie. `weeks_ahead` geldt per gekozen weekdag

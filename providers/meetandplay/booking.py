@@ -26,6 +26,8 @@ SEARCH_URL = "https://www.meetandplay.nl/zoeken"
 PADEL_SPORT_ID = "2"
 
 START_TIME_SELECTOR = 'input[name="time"]'
+# Enkelspel staat soms alleen in de baannaam, bijv. "Padelhal | Baan 5 (SINGLE | max. 2 spelers)"
+SINGLES_MARKERS = ("enkelspel", "single", "max. 2 spelers", "max 2 spelers")
 CHECKOUT_URL_KEYWORDS = ["reserveren", "winkelwagen", "payment", "checkout", "betaling", "betalen", "order", "bestelling"]
 LIVEWIRE_DATE_RE = re.compile(r"window\.Livewire\.find\('([^']+)'\)\.set\('date'")
 SLOT_LABEL_JS = """el => {
@@ -45,6 +47,10 @@ def _first_present(page: Page, selectors: list[str], visible: bool = False) -> L
     return None
 
 
+class PendingReservationError(Exception):
+    """Deze sessie heeft al een openstaande (onbetaalde) reservering bij een andere club."""
+
+
 def _failure(error: str) -> ProviderResult:
     return ProviderResult(success=False, provider=PROVIDER, error=error)
 
@@ -57,6 +63,8 @@ class MeetAndPlayBooker:
         self._credentials = request["credentials"]
         self._provider_config = request.get("provider_config", {})
         self._dry_run = request.get("dry_run", False)
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
 
         cookies_file = self._provider_config.get("cookies_file", ".meetandplay_cookies.json")
         self.session_manager = SessionManager(cookies_file)
@@ -128,6 +136,21 @@ class MeetAndPlayBooker:
                 "Automatisch inloggen mislukt. Controleer KNLTB_EMAIL/KNLTB_PASSWORD."
             )
         return new_context
+
+    def _fresh_session_page(self) -> Page:
+        """Nieuwe sessie (opnieuw inloggen zonder cookies): een eigen, lege reservering."""
+        logger.info("Nieuwe sessie starten zodat de openstaande reservering behouden blijft...")
+        if self._context:
+            with contextlib.suppress(Exception):
+                self._context.close()
+        self._context = None
+        email = self._credentials.get("email", "").strip()
+        password = self._credentials.get("password", "").strip()
+        context, success = self.session_manager.auto_login(self._browser, email, password)
+        if not success:
+            raise RuntimeError("Opnieuw inloggen voor een nieuwe sessie mislukt")
+        self._context = context
+        return context.new_page()
 
     # ------------------------------------------------------------------
     # Zoeken naar clubs
@@ -238,13 +261,13 @@ class MeetAndPlayBooker:
                 return slot_info
         return None
 
-    def _label_skip_reason(self, label: str) -> str | None:
-        """Geef een reden als het baanlabel niet past bij court_type/game_type."""
+    def _label_skip_reason(self, label: str, court_name: str = "") -> str | None:
+        """Geef een reden als het baanlabel of de baannaam niet past bij court_type/game_type."""
         court_type = self._booking.get("court_type", "indoor")
         game_type = self._booking.get("game_type", "double").lower()
         if court_type == "indoor" and "buiten" in label:
             return "buitenbaan"
-        if game_type == "double" and "enkelspel" in label:
+        if game_type == "double" and any(m in f"{label} {court_name.lower()}" for m in SINGLES_MARKERS):
             return "enkelspel"
         if game_type == "single" and "dubbelspel" in label:
             return "dubbelspel"
@@ -257,9 +280,14 @@ class MeetAndPlayBooker:
         except Exception:  # noqa: BLE001
             label = ""
 
-        reason = self._label_skip_reason(label)
+        try:
+            court_name = slot.locator(".timeslot-name").first.inner_text().strip().split("\n")[0].strip()
+        except Exception:  # noqa: BLE001
+            court_name = "Onbekende baan"
+
+        reason = self._label_skip_reason(label, court_name)
         if reason:
-            logger.info("Slot %d overgeslagen: %s (%r)", i, reason, label)
+            logger.info("Slot %d overgeslagen: %s (%r, baan: %r)", i, reason, label, court_name)
             return None
 
         try:
@@ -285,11 +313,6 @@ class MeetAndPlayBooker:
                 i, int(duration_match.group(1)), duration_minutes, slot_start_str, label
             )
             return None
-
-        try:
-            court_name = slot.locator(".timeslot-name").first.inner_text().strip().split("\n")[0].strip()
-        except Exception:  # noqa: BLE001
-            court_name = "Onbekende baan"
 
         logger.info("Tijdslot gevonden: %s om %s (baan: %s)", club["name"], slot_start_str, court_name)
         return {
@@ -364,7 +387,24 @@ class MeetAndPlayBooker:
         logger.info("'%s'-knop gevonden, klikken...", add_btn.first.inner_text().strip())
         add_btn.first.click()
         page.wait_for_timeout(2500)
+        self._raise_if_pending_reservation(page)
         return True
+
+    @staticmethod
+    def _raise_if_pending_reservation(page: Page) -> None:
+        """
+        Meet & Play staat per sessie één openstaande reservering toe. Staat er al een (bijv. van een
+        eerdere boeking die nog betaald moet worden), dan verschijnt "Je reservering bij …" met
+        Annuleren / Doorgaan. Doorgaan laat de andere reservering vervallen — dus annuleren.
+        """
+        erase_btn = page.locator('button[wire\\:click="erase"]')
+        if erase_btn.count() == 0 or not erase_btn.first.is_visible():
+            return
+        logger.info("Openstaande reservering in deze sessie — pop-up annuleren (andere reservering blijft staan)")
+        with contextlib.suppress(Exception):
+            page.locator('.modal.active button[wire\\:click="hide"]').first.click()
+            page.wait_for_timeout(1000)
+        raise PendingReservationError("openstaande reservering in deze sessie")
 
     def _checkout(self, page: Page, slot_id: str) -> bool:
         """Klik 'Afrekenen' en controleer of de winkelwagen/betaalpagina bereikt is."""
@@ -386,6 +426,8 @@ class MeetAndPlayBooker:
 
         logger.info("'Afrekenen'-knop klikken...")
         checkout_btn.first.click()
+        page.wait_for_timeout(1000)
+        self._raise_if_pending_reservation(page)
 
         with contextlib.suppress(Exception):
             page.wait_for_url(
@@ -482,7 +524,14 @@ class MeetAndPlayBooker:
                     logger.info("Dry-run: tijdslot gevonden maar boeking overgeslagen")
                     return _failure("dry_run — tijdslot gevonden maar niet geboekt")
 
-                if self._book_timeslot(page, slot_info):
+                try:
+                    booked = self._book_timeslot(page, slot_info)
+                except PendingReservationError:
+                    page = self._fresh_session_page()
+                    slot_info = self._find_timeslot(page, club, booking_date=booking_date)
+                    booked = bool(slot_info) and self._book_timeslot(page, slot_info)
+
+                if booked:
                     return ProviderResult(
                         success=True,
                         provider=PROVIDER,
@@ -520,12 +569,10 @@ class MeetAndPlayBooker:
             return _failure("Alle doeldata al geboekt (skip_booked_dates)")
 
         with sync_playwright() as pw:
-            browser = None
-            context = None
             try:
-                browser = pw.chromium.launch(headless=True)
-                context = self._ensure_logged_in(browser, self.session_manager.new_context(browser))
-                page = context.new_page()
+                self._browser = pw.chromium.launch(headless=True)
+                self._context = self._ensure_logged_in(self._browser, self.session_manager.new_context(self._browser))
+                page = self._context.new_page()
 
                 # Gerichte run (scheduler): direct naar de opgegeven clubs, zonder zoekpagina
                 clubs = self._booking.get("clubs") or self._search_clubs(page)
@@ -540,7 +587,7 @@ class MeetAndPlayBooker:
                 return _failure(str(e))
 
             finally:
-                for resource in (context, browser):
+                for resource in (self._context, self._browser):
                     if resource:
                         with contextlib.suppress(Exception):
                             resource.close()
