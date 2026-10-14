@@ -4,9 +4,13 @@ Gebruikt Playwright voor browser automatisering.
 """
 
 import contextlib
+import html
+import json
 import logging
+import math
 import re
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Locator, Page, sync_playwright
@@ -39,6 +43,13 @@ PAY_BUTTON_SELECTORS = [
 PAY_ATTEMPTS = 2
 # Waarden van de afstand-dropdown op /zoeken (400 = "Toon alles")
 DISTANCE_OPTIONS_KM = (5, 10, 20, 50, 100, 150, 200, 400)
+# De zoekpagina bevat de coördinaten van alle clubs (Livewire-params van de kaart)
+CLUB_COORDS_RE = re.compile(
+    r'"slug":"([^"]+)","name":"(?:[^"\\]|\\.)*","latitude":"(-?[\d.]+)","longitude":"(-?[\d.]+)"'
+)
+CLUB_SLUG_RE = re.compile(r"/club/([^/?#]+)")
+# Clubpagina: kaart-initialisatie met de clublocatie, voor clubs die niet op de zoekpagina staan
+CLUB_PAGE_COORDS_RE = re.compile(r"\{latitude: (-?[\d.]+), longitude: (-?[\d.]+)\}")
 LIVEWIRE_DATE_RE = re.compile(r"window\.Livewire\.find\('([^']+)'\)\.set\('date'")
 SLOT_LABEL_JS = """el => {
     let sibling = el.closest('.timeslots');
@@ -55,15 +66,24 @@ def _is_payment_url(url: str) -> bool:
 
 
 def _distance_option(radius_km) -> str:
-    """Grootste afstand uit de dropdown die niet verder zoekt dan `radius_km` (minimaal 5 km)."""
-    radius = int(radius_km)
-    option = max((d for d in DISTANCE_OPTIONS_KM if d <= radius), default=DISTANCE_OPTIONS_KM[0])
-    if option != radius:
-        logger.warning(
-            "Straal %d km kan niet op Meet & Play (kies uit %s) — %d km gebruikt",
-            radius, ", ".join(map(str, DISTANCE_OPTIONS_KM)), option,
-        )
-    return str(option)
+    """Kleinste afstand uit de dropdown die `radius_km` dekt; daarbinnen filtert de booker zelf op afstand."""
+    radius = float(radius_km)
+    return str(next((d for d in DISTANCE_OPTIONS_KM if d >= radius), DISTANCE_OPTIONS_KM[-1]))
+
+
+def parse_club_coordinates(page_html: str) -> dict[str, list[float]]:
+    """{club-slug: [lat, lon]} uit de HTML van de zoekpagina."""
+    return {
+        slug: [float(lat), float(lon)]
+        for slug, lat, lon in CLUB_COORDS_RE.findall(html.unescape(page_html))
+    }
+
+
+def distance_km(a: list[float], b: list[float]) -> float:
+    """Hemelsbrede afstand (haversine) tussen twee [lat, lon]-punten."""
+    lat1, lon1, lat2, lon2 = map(math.radians, (*a, *b))
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return 2 * 6371 * math.asin(math.sqrt(h))
 
 
 def _first_present(page: Page, selectors: list[str], visible: bool = False) -> Locator | None:
@@ -96,6 +116,70 @@ class MeetAndPlayBooker:
 
         cookies_file = self._provider_config.get("cookies_file", ".meetandplay_cookies.json")
         self.session_manager = SessionManager(cookies_file)
+        # Clubcoördinaten uit de zoekpagina, bewaard voor gerichte runs (die slaan de zoekpagina over)
+        self._coords_file = Path(cookies_file).with_name(".meetandplay_club_coords.json")
+
+    # ------------------------------------------------------------------
+    # Afstand tot de clubs
+    # ------------------------------------------------------------------
+
+    def _load_club_coords(self) -> dict[str, list[float]]:
+        try:
+            return json.loads(self._coords_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _save_club_coords(self, coords: dict[str, list[float]]) -> None:
+        with contextlib.suppress(OSError):
+            self._coords_file.write_text(json.dumps(coords), encoding="utf-8")
+
+    @staticmethod
+    def _club_page_coords(page: Page, url: str) -> list[float] | None:
+        try:
+            page.goto(url, wait_until="load", timeout=30000)
+            match = CLUB_PAGE_COORDS_RE.search(page.content())
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Coördinaten van %s niet opgehaald: %s", url, e)
+            return None
+        return [float(match.group(1)), float(match.group(2))] if match else None
+
+    def _within_radius(
+        self, clubs: list[dict], coords: dict[str, list[float]] | None = None, page: Page | None = None,
+    ) -> list[dict]:
+        """
+        Laat clubs vallen die hemelsbreed verder liggen dan `radius_km` vanaf `latitude`/`longitude`.
+        Ontbreekt een club in `coords`, dan wordt (met `page`) de clubpagina gelezen; lukt ook dat
+        niet, dan blijft de club staan.
+        """
+        location = self._booking["location"]
+        if location.get("latitude") is None or location.get("longitude") is None:
+            return clubs
+        origin = [float(location["latitude"]), float(location["longitude"])]
+        radius = float(location["radius_km"])
+        coords = self._load_club_coords() if coords is None else dict(coords)
+
+        kept = []
+        added = False
+        for club in clubs:
+            match = CLUB_SLUG_RE.search(club.get("url", ""))
+            position = coords.get(match.group(1)) if match else None
+            if position is None and match and page is not None:
+                position = self._club_page_coords(page, club["url"])
+                if position:
+                    coords[match.group(1)] = position
+                    added = True
+            if position is None:
+                logger.info("%s: locatie onbekend — niet op afstand gefilterd", club["name"])
+                kept.append(club)
+                continue
+            km = distance_km(origin, position)
+            if km > radius:
+                logger.info("%s overgeslagen: %.1f km (straal %g km)", club["name"], km, radius)
+            else:
+                kept.append(club)
+        if added:
+            self._save_club_coords(coords)
+        return kept
 
     # ------------------------------------------------------------------
     # Datumberekening
@@ -189,7 +273,10 @@ class MeetAndPlayBooker:
         radius = _distance_option(self._booking["location"]["radius_km"])
         date_str = self._get_upcoming_booking_dates(count=1)[0].strftime("%d-%m-%Y")
 
-        logger.info("Zoeken naar clubs in %s (straal %s km) op %s...", city, radius, date_str)
+        logger.info(
+            "Zoeken naar clubs in %s (straal %s km, zoekpagina %s km) op %s...",
+            city, self._booking["location"]["radius_km"], radius, date_str,
+        )
 
         page.goto(SEARCH_URL, wait_until="load", timeout=30000)
         page.wait_for_timeout(1500)
@@ -227,7 +314,15 @@ class MeetAndPlayBooker:
             except Exception as e:  # noqa: BLE001 — sla onleesbare kaart over
                 logger.debug("Fout bij uitlezen club %d: %s", i, e)
 
-        return clubs
+        coords = {}
+        with contextlib.suppress(Exception):
+            coords = parse_club_coordinates(page.content())
+        if not coords:
+            logger.warning("Geen clubcoördinaten op de zoekpagina")
+        # Bewaarde coördinaten aanvullen (o.a. eerder van clubpagina's gelezen) en opslaan
+        coords = {**self._load_club_coords(), **coords}
+        self._save_club_coords(coords)
+        return self._within_radius(clubs, coords, page)
 
     # ------------------------------------------------------------------
     # Tijdslot selecteren
@@ -625,7 +720,10 @@ class MeetAndPlayBooker:
                 page = self._context.new_page()
 
                 # Gerichte run (scheduler): direct naar de opgegeven clubs, zonder zoekpagina
-                clubs = self._booking.get("clubs") or self._search_clubs(page)
+                if self._booking.get("clubs"):
+                    clubs = self._within_radius(self._booking["clubs"], page=page)
+                else:
+                    clubs = self._search_clubs(page)
                 if not clubs:
                     logger.warning("Geen clubs gevonden met de opgegeven filters")
                     return _failure("Geen clubs gevonden")

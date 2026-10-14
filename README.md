@@ -60,7 +60,7 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 | `knltb_password` | Wachtwoord van je KNLTB account |
 | `ha_notify_device_id` | Device ID voor push notificaties (optioneel) |
 | `location_city` | Stad om clubs in te zoeken (bijv. `Boskoop`) |
-| `location_radius_km` | Zoekradius in kilometers (hemelsbreed). Meet & Play kent alleen 5, 10, 20, 50, 100, 150 en 200 km; een andere waarde wordt naar beneden afgerond (bijv. 15 → 10) |
+| `location_radius_km` | Zoekradius in kilometers (hemelsbreed vanaf `location_latitude`/`location_longitude`). Elke waarde werkt, bijv. 15: Meet & Play zoekt met de eerstvolgende stap uit de dropdown (5, 10, 20, 50 … km) en de addon laat clubs verder dan je straal zelf vallen |
 | `location_latitude` | Breedtegraad voor Playtomic zoeken (bijv. `52.0738`) |
 | `location_longitude` | Lengtegraad voor Playtomic zoeken (bijv. `4.6567`) |
 | `booking_days` | Eén of meer weekdagen om te boeken, bijv. `thursday` of `tuesday` + `thursday` (standaard `thursday`). Vervangt `booking_day` uit versies vóór 2.5.0 — na de update staat `booking_days` op `thursday`; controleer dit als je een andere dag had |
@@ -464,6 +464,19 @@ Meet & Play staat per sessie één openstaande (nog niet betaalde) reservering t
 run meerdere datums, dan verschijnt bij de tweede de pop-up "Je reservering bij …". De addon kiest
 "Annuleren" en logt opnieuw in voor een nieuwe sessie, zodat de eerste betaallink geldig blijft. In de log:
 `Openstaande reservering in deze sessie — pop-up annuleren` gevolgd door `Nieuwe sessie starten`.
+
+### Club ontbreekt of wordt overgeslagen vanwege afstand (Meet & Play)
+
+De addon rekent per club de hemelsbrede afstand uit vanaf `location_latitude`/`location_longitude` (standaard
+Boskoop) en slaat clubs buiten `location_radius_km` over:
+
+```
+TERWEGEN INDOOR overgeslagen: 18.9 km (straal 15 km)
+```
+
+De coördinaten komen van de zoekpagina van Meet & Play, of van de clubpagina als een club daar ontbreekt, en
+worden bewaard in `/config/padel/.meetandplay_club_coords.json` zodat ook de gerichte runs op het
+vrijgavemoment filteren. Rijafstand kan flink afwijken van hemelsbreed; zet de straal daarop af.
 
 ### Notificatie zonder betaallink / "Geen betaallink — slot telt niet als geboekt" (Meet & Play)
 
