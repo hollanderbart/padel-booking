@@ -331,6 +331,7 @@ ruff check .
 
 CI (`.github/workflows/test.yml`) draait bij elke push naar `main`: `ruff check .`, een controle
 of `padel_booking/` gesynchroniseerd is met de bronbestanden, en alle unit tests.
+De integratietest draait alleen als de repository-secrets `KNLTB_EMAIL` en `KNLTB_PASSWORD` zijn ingesteld.
 
 ### Via Docker
 

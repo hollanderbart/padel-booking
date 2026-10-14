@@ -1,3 +1,7 @@
+## 2.2.12
+
+- Fix: GitHub Actions workflow was ongeldig (`secrets` in een job-level `if`), waardoor CI nooit draaide. De integratietest wordt nu per stap overgeslagen als `KNLTB_EMAIL` niet als secret is ingesteld
+
 ## 2.2.11
 
 Codekwaliteit-refactor (geen nieuwe functionaliteit of configuratie-opties).
