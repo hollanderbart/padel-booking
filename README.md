@@ -62,7 +62,7 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 | `game_type` | Speltype: `double` (4 spelers) of `single` (2 spelers) |
 | `weeks_ahead` | Aantal weken vooruit zoeken |
 | `meetandplay_enabled` | Meet & Play provider in/uitschakelen (standaard `true`) |
-| `playtomic_enabled` | Playtomic provider in/uitschakelen (standaard `false`) |
+| `playtomic_enabled` | Playtomic provider in/uitschakelen (standaard `false`). **Tijdelijk genegeerd** — Playtomic staat uit sinds v2.3.1, zie Troubleshooting |
 | `fetch_bookings_enabled` | Toekomstige boekingen ophalen en opslaan naar `/config/padel/future_bookings.json` (standaard `true`) |
 | `skip_booked_dates` | Sla datums over die al voorkomen in `future_bookings.json` voordat er gezocht wordt (standaard `true`) |
 | `playtomic_email` | E-mailadres van je Playtomic account (vereist als Playtomic ingeschakeld) |
@@ -394,8 +394,8 @@ Bij de upgrade van v1 (knltb_padel_booking) naar v2 (padel_booking) moet je:
 - Controleer `playtomic_email` en `playtomic_password`
 - Als je Playtomic account via Google/Apple SSO is aangemaakt, stel dan eerst een wachtwoord in via "Wachtwoord vergeten" op playtomic.io
 - Bekend probleem (oktober 2026): de API-host `api.playtomic.io` heeft geen DNS-record meer. Fouten als
-  `Could not resolve host` / `NameResolutionError` in de log komen daardoor; de Playtomic provider werkt
-  tot de nieuwe API-host is ingesteld in `providers/playtomic/client.py` niet
+  `Could not resolve host` / `NameResolutionError` in de log komen daardoor. Daarom is de Playtomic provider
+  sinds v2.3.1 tijdelijk uitgeschakeld (`disabled_reason` in `orchestrator.py`), ongeacht `playtomic_enabled`
 
 ### Script vindt geen banen terwijl er wel slots beschikbaar zijn
 

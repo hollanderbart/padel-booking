@@ -1,3 +1,7 @@
+## 2.3.1
+
+- Playtomic provider tijdelijk uitgeschakeld (ook als `playtomic_enabled: true` is ingesteld): de API-host `api.playtomic.io` resolveert niet meer. Geldt voor zowel boeken als het ophalen van toekomstige boekingen; de log toont een waarschuwing
+
 ## 2.3.0
 
 - Feature: booking research — de GitHub Action `booking-research.yml` meet zes keer per dag per Meet & Play club tot hoe ver vooruit en vanaf welk moment banen vrijkomen, en leidt de release-strategie af (rollend op exact tijdstip, dagelijks vast uur, blok-release). Rapport: `BOOKING_WINDOWS.md` op de branch `booking-research`

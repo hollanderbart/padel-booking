@@ -339,11 +339,14 @@ class TestEnabledProviders:
         assert credentials["email"] == "a@b.nl"
         assert provider_cfg == {"cookies_file": ".meetandplay_cookies.json"}
 
-    def test_playtomic_inschakelen_met_eigen_tokenbestand(self):
-        config = {"providers": {
-            "meetandplay": {"enabled": False},
-            "playtomic": {"enabled": True, "token_cache_file": "/data/t.json"},
-        }}
+    def test_eigen_sessiebestand_uit_config(self):
+        config = {"providers": {"meetandplay": {"cookies_file": "/data/c.json"}}}
         result = enabled_providers(config)
-        assert [spec.name for spec, _, _ in result] == ["playtomic"]
-        assert result[0][2] == {"token_cache_file": "/data/t.json"}
+        assert result[0][2] == {"cookies_file": "/data/c.json"}
+
+    def test_playtomic_tijdelijk_uitgeschakeld_ook_als_config_hem_aanzet(self, caplog):
+        config = {"providers": {"playtomic": {"enabled": True}}}
+        with caplog.at_level("WARNING"):
+            result = enabled_providers(config)
+        assert [spec.name for spec, _, _ in result] == ["meetandplay"]
+        assert "tijdelijk uitgeschakeld" in caplog.text
