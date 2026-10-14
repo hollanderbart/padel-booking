@@ -1,3 +1,8 @@
+## 2.7.0
+
+- Feature (Meet & Play): `location_radius_km` werkt nu met elke waarde (bijv. 15). De zoekpagina gebruikt de eerstvolgende dropdownstap (20 km) en de addon rekent per club de hemelsbrede afstand na vanaf `location_latitude`/`location_longitude`; clubs verder weg worden overgeslagen. Dat geldt ook voor de gerichte runs op het vrijgavemoment (coördinaten bewaard in `/config/padel/.meetandplay_club_coords.json`)
+- Inclusief 2.6.2: geen Playtomic DNS-waarschuwing meer als `playtomic_enabled` uit staat
+
 ## 2.6.2
 
 - Fix: met `playtomic_enabled: false` logde elke run toch "Provider 'playtomic' tijdelijk uitgeschakeld: … (DNS)". De eigen aan/uit-instelling wordt nu eerst gecontroleerd; de DNS-waarschuwing verschijnt alleen nog als je Playtomic aanzet

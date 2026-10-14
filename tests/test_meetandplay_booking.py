@@ -804,8 +804,67 @@ class TestGerichteRun:
 
 class TestDistanceOption:
     @pytest.mark.parametrize("radius,expected", [
-        (10, "10"), (20, "20"), (15, "10"), (3, "5"), (75, "50"), ("20", "20"), (1000, "400"),
+        (10, "10"), (20, "20"), (15, "20"), (3, "5"), (75, "100"), ("20", "20"), (1000, "400"),
     ])
-    def test_kiest_grootste_toegestane_straal(self, radius, expected):
+    def test_kiest_kleinste_dekkende_straal(self, radius, expected):
         from providers.meetandplay.booking import _distance_option
         assert _distance_option(radius) == expected
+
+
+BOSKOOP = [52.07, 4.66]
+SEARCH_HTML = (
+    '<div wire:snapshot="{&quot;clubs&quot;:[{&quot;id&quot;:1,&quot;slug&quot;:&quot;88191&quot;,'
+    '&quot;name&quot;:&quot;Hal 0172&quot;,&quot;latitude&quot;:&quot;52.1550&quot;,&quot;longitude&quot;:&quot;4.7650&quot;},'
+    '{&quot;id&quot;:2,&quot;slug&quot;:&quot;88018&quot;,&quot;name&quot;:&quot;TERWEGEN \\&quot;INDOOR\\&quot;&quot;,'
+    '&quot;latitude&quot;:&quot;52.2580&quot;,&quot;longitude&quot;:&quot;4.5260&quot;},'
+    '{&quot;id&quot;:3,&quot;slug&quot;:&quot;99&quot;,&quot;name&quot;:&quot;Zonder&quot;,&quot;latitude&quot;:null,&quot;longitude&quot;:null}]}">'
+)
+
+
+class TestClubAfstand:
+    def test_coordinaten_uit_zoekpagina(self):
+        from providers.meetandplay.booking import parse_club_coordinates
+        coords = parse_club_coordinates(SEARCH_HTML)
+        assert coords == {"88191": [52.155, 4.765], "88018": [52.258, 4.526]}
+
+    def test_afstand_boskoop_nieuwkoop(self):
+        from providers.meetandplay.booking import distance_km
+        assert 11 < distance_km(BOSKOOP, [52.155, 4.765]) < 13
+
+    def _booker(self, tmp_path, radius=15, lat=BOSKOOP[0], lon=BOSKOOP[1]):
+        request = _make_request()
+        request["booking_request"]["location"] = {
+            "city": "Boskoop", "radius_km": radius, "latitude": lat, "longitude": lon,
+        }
+        request["provider_config"] = {"cookies_file": str(tmp_path / ".cookies.json")}
+        return _make_booker(request)
+
+    CLUBS = [
+        {"name": "Hal 0172", "url": "https://meetandplay.nl/club/88191", "address": ""},
+        {"name": "TERWEGEN INDOOR", "url": "https://meetandplay.nl/club/88018", "address": ""},
+        {"name": "Onbekend", "url": "https://meetandplay.nl/club/12345", "address": ""},
+    ]
+
+    def test_clubs_buiten_straal_vallen_af(self, tmp_path):
+        from providers.meetandplay.booking import parse_club_coordinates
+        booker = self._booker(tmp_path)
+        kept = booker._within_radius(self.CLUBS, parse_club_coordinates(SEARCH_HTML))
+        assert [c["name"] for c in kept] == ["Hal 0172", "Onbekend"]
+
+    def test_gerichte_run_gebruikt_bewaarde_coordinaten(self, tmp_path):
+        from providers.meetandplay.booking import parse_club_coordinates
+        booker = self._booker(tmp_path)
+        booker._save_club_coords(parse_club_coordinates(SEARCH_HTML))
+        assert [c["name"] for c in booker._within_radius(self.CLUBS)] == ["Hal 0172", "Onbekend"]
+
+    def test_zonder_eigen_locatie_geen_filter(self, tmp_path):
+        booker = self._booker(tmp_path, lat=None, lon=None)
+        assert booker._within_radius(self.CLUBS, {"88018": [52.258, 4.526]}) == self.CLUBS
+
+    def test_onbekende_club_via_clubpagina(self, tmp_path):
+        booker = self._booker(tmp_path)
+        page = MagicMock()
+        page.content.return_value = "initMap([...], 10, {latitude: 51.9109862, longitude: 4.616995}, false)"
+        clubs = [{"name": "My Padel Club Krimpen", "url": "https://meetandplay.nl/club/88115", "address": ""}]
+        assert booker._within_radius(clubs, {}, page) == []
+        assert booker._load_club_coords() == {"88115": [51.9109862, 4.616995]}
