@@ -42,6 +42,15 @@ def save_debug_screenshot(page: Page, name: str) -> None:
         logger.info("Debug screenshot opgeslagen: %s", path)
 
 
+def save_debug_page(page: Page, name: str) -> None:
+    """Screenshot (`name`.png) én HTML (`name`.html) van de huidige pagina, voor diagnose achteraf."""
+    save_debug_screenshot(page, f"{name}.png")
+    path = DEBUG_DIR / f"{name}.html"
+    with contextlib.suppress(Exception):
+        path.write_text(page.content(), encoding="utf-8")
+        logger.info("Debug HTML opgeslagen: %s", path)
+
+
 def _click_submit_if_present(page: Page, selector: str = SUBMIT_SELECTOR) -> bool:
     submit_btn = page.locator(selector)
     if submit_btn.count() == 0:

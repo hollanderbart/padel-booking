@@ -21,10 +21,12 @@ De boeking en betaling doe je zelf handmatig via de link in de notificatie. Er w
 
 **Alleen datums zonder boeking**: vóór elke volledige run haalt de addon je reserveringen op uit je
 Meet & Play account ([mijn-aankopen](https://meetandplay.nl/mijn-aankopen), tabblad "Aankomend") en,
-als die provider aan staat, uit Playtomic. Datums waarop je al een baan hebt worden overgeslagen, net
-als datums waarvoor de addon eerder al een slot vond (`booking_history.json`, ook als de betaling nog
-open staat). Een run probeert vervolgens **alle** overgebleven datums te boeken; per gevonden slot krijg
-je een notificatie met betaallink.
+als die provider aan staat, uit Playtomic. Alleen datums waarop je in je account al een baan hebt
+worden overgeslagen. Een slot dat de addon eerder vond maar dat je niet betaald hebt, telt niet: die datum
+wordt opnieuw gezocht. Een run probeert **alle** overgebleven datums te boeken; per gevonden slot krijg je
+een notificatie met betaallink (iDEAL of de betaalpagina van de club). Komt de addon niet tot de
+betaalpagina, dan telt het slot niet als gevonden en zoekt hij verder — de winkelwagen zit namelijk alleen
+in de browsersessie van de addon, dus een link naar meetandplay.nl zou voor jou leeg zijn.
 
 ---
 
@@ -135,9 +137,10 @@ Of voeg dit toe aan `automations.yaml`:
 Vóór elke volledige run (bij het starten van de addon en om 00:01) haalt de addon live je toekomstige reserveringen op (Meet & Play via [mijn-aankopen](https://meetandplay.nl/mijn-aankopen), Playtomic via de API als die provider aan staat) en schrijft ze naar `/config/padel/future_bookings.json`. De booker slaat die datums over (`skip_booked_dates`), en je kunt ze weergeven in een Lovelace dashboard.
 
 Lukt het ophalen niet (bijv. inloggen mislukt), dan blijft het bestaande bestand staan — anders zou de booker
-datums die al geboekt zijn opnieuw proberen. Let op: Meet & Play meldt dat nieuwe boekingen er pas na even
-zichtbaar zijn; datums waarvoor de addon zelf een slot vond, staan daarom ook in `booking_history.json` en
-worden ook overgeslagen.
+datums die al geboekt zijn opnieuw proberen. Alleen dit bestand bepaalt welke datums als geboekt
+gelden; `booking_history.json` is puur een logboek. Betaal je een gevonden slot, dan staat die datum na de
+eerstvolgende volledige run (00:01 of herstart) in `future_bookings.json`. Tot die tijd kan een gerichte run
+op een vrijgavemoment voor dezelfde datum nog een tweede betaallink sturen — die kun je negeren.
 
 ### Stap 1 — Voeg de sensor toe aan `configuration.yaml`
 
@@ -263,38 +266,9 @@ Het bestand bevat maximaal 20 entries. De nieuwste boeking staat bovenaan.
 
 ## Boeking resetten (opnieuw zoeken forceren)
 
-Na een gevonden slot zet de addon de datum in `/config/padel/booking_history.json`. Toekomstige datums uit
-die geschiedenis worden niet opnieuw gezocht — ook niet als je de betaling niet afgerond hebt. Wil je dat
-de addon die datums tóch opnieuw probeert, verwijder dan de toekomstige datums uit de geschiedenis (de
-datums in het verleden blijven staan voor het dashboard). Reserveringen in je account worden altijd
-overgeslagen.
-
-### Stap 1 — Voeg de shell_command toe aan `configuration.yaml`
-
-```yaml
-shell_command:
-  padel_reset_booking: >-
-    python3 -c "import json, datetime;
-    p = '/config/padel/booking_history.json';
-    t = datetime.date.today().isoformat();
-    h = json.load(open(p));
-    json.dump([e for e in h if e.get('booked_date', '') < t], open(p, 'w'), indent=2)"
-```
-
-Herstart daarna Home Assistant.
-
-### Stap 2 — Voeg een knop toe aan je Lovelace dashboard
-
-```yaml
-type: button
-name: Padel boeking resetten
-icon: mdi:calendar-remove
-tap_action:
-  action: call-service
-  service: shell_command.padel_reset_booking
-```
-
-Na het tikken op de knop zal de addon bij de eerstvolgende run opnieuw zoeken naar een beschikbaar slot.
+Niet meer nodig sinds v2.6.0: alleen reserveringen in je account tellen als geboekt. Een gevonden maar niet
+betaald slot wordt bij de volgende run vanzelf opnieuw gezocht. Had je de `padel_reset_booking`
+shell_command uit een eerdere versie, dan kun je die verwijderen.
 
 ---
 
@@ -489,6 +463,19 @@ Meet & Play staat per sessie één openstaande (nog niet betaalde) reservering t
 run meerdere datums, dan verschijnt bij de tweede de pop-up "Je reservering bij …". De addon kiest
 "Annuleren" en logt opnieuw in voor een nieuwe sessie, zodat de eerste betaallink geldig blijft. In de log:
 `Openstaande reservering in deze sessie — pop-up annuleren` gevolgd door `Nieuwe sessie starten`.
+
+### Notificatie zonder betaallink / "Geen betaallink — slot telt niet als geboekt" (Meet & Play)
+
+Na "Betaling starten" moet de addon op de betaalpagina uitkomen (iDEAL of de boekingssite van de club).
+Blijft hij op `meetandplay.nl/club/<id>/reserveren` staan, dan probeert hij het nog één keer en anders telt
+het slot niet als gevonden (de winkelwagen zit alleen in de sessie van de addon, dus jij kunt er niet bij).
+Hij zoekt dan verder bij de volgende club. Ter diagnose bewaart de addon een screenshot en de HTML van die
+pagina:
+
+```bash
+$SSH "ls -l /config/padel/debug_payment_failed.*"
+scp -i ~/.ssh/id_ed25519_ha root@192.168.2.5:/config/padel/debug_payment_failed.png .
+```
 
 ### Script vindt geen banen
 

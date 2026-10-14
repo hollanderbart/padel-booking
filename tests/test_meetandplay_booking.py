@@ -577,15 +577,65 @@ class TestBookTimeslot:
         )
         assert booker._book_timeslot(page, dict(self.SLOT)) is False
 
-    def test_zonder_betaalknop_wordt_checkout_url_gebruikt(self):
+    @patch("providers.meetandplay.booking.save_debug_page")
+    def test_zonder_betaalknop_telt_niet_als_geboekt(self, save_debug):
         booker = _make_booker()
         page = self._make_page(
             {"a.timeslot[id='slot-1']": _locator(), "Toevoegen": _locator(), "checkout(slot-1)": _locator()},
             ["https://www.meetandplay.nl/club", "https://www.meetandplay.nl/winkelwagen"],
         )
+        assert booker._book_timeslot(page, dict(self.SLOT)) is False
+        save_debug.assert_called_once_with(page, "debug_payment_failed")
+
+    @patch("providers.meetandplay.booking.save_debug_page")
+    def test_betaalpagina_niet_bereikt_probeert_opnieuw_en_telt_niet(self, save_debug):
+        booker = _make_booker()
+        pay_btn = _locator(text="Betaling starten")
+        page = self._make_page(
+            {
+                "a.timeslot[id='slot-1']": _locator(),
+                "Toevoegen": _locator(),
+                "checkout(slot-1)": _locator(),
+                "input#tos": _locator(),
+                "Betaling starten": pay_btn,
+            },
+            ["https://www.meetandplay.nl/club", "https://meetandplay.nl/club/88018/reserveren"],
+        )
+        assert booker._book_timeslot(page, dict(self.SLOT)) is False
+        assert pay_btn.first.click.call_count == 2
+        save_debug.assert_called_once()
+
+    def test_betaalpagina_in_nieuw_tabblad(self):
+        booker = _make_booker()
+        page = self._make_page(
+            {
+                "a.timeslot[id='slot-1']": _locator(),
+                "Toevoegen": _locator(),
+                "checkout(slot-1)": _locator(),
+                "input#tos": _locator(),
+                "Betaling starten": _locator(),
+            },
+            ["https://www.meetandplay.nl/club", "https://meetandplay.nl/club/88018/reserveren"],
+        )
+        popup = MagicMock()
+        popup.url = "https://pay.ideal.nl/transactions/abc"
+        page.context.pages = [page, popup]
         slot = dict(self.SLOT)
         assert booker._book_timeslot(page, slot) is True
-        assert slot["payment_url"] == "https://www.meetandplay.nl/winkelwagen"
+        assert slot["payment_url"] == "https://pay.ideal.nl/transactions/abc"
+
+
+class TestIsPaymentUrl:
+    @pytest.mark.parametrize("url,expected", [
+        ("https://pay.ideal.nl/transactions/x", True),
+        ("https://boeken.terwegen.nl/nl/cart/abc/checkout", True),
+        ("https://meetandplay.nl/club/88018/reserveren", False),
+        ("https://www.meetandplay.nl/winkelwagen", False),
+        ("", False),
+    ])
+    def test_herkent_betaalpagina(self, url, expected):
+        from providers.meetandplay.booking import _is_payment_url
+        assert _is_payment_url(url) is expected
 
 
 class TestAddToCartEigenKnop:

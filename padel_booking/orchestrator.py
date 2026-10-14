@@ -20,7 +20,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -277,29 +277,6 @@ def load_future_booking_dates(future_bookings_file: Path) -> set[str]:
         return set()
 
 
-def load_handled_dates(history_file: Path, today: date | None = None) -> set[str]:
-    """
-    Toekomstige datums waarvoor de bot al een slot gevonden heeft (booking_history.json).
-    Ook als de betaling nog open staat: zo komt er geen tweede betaallink voor dezelfde avond.
-    """
-    today_iso = (today or date.today()).isoformat()
-    try:
-        with open(history_file, encoding="utf-8") as f:
-            history = json.load(f)
-    except FileNotFoundError:
-        return set()
-    except (OSError, ValueError) as e:
-        logger.warning("Fout bij lezen boekingsgeschiedenis: %s", e)
-        return set()
-    dates = {
-        e["booked_date"] for e in history
-        if isinstance(e, dict) and e.get("booked_date", "") >= today_iso
-    }
-    if dates:
-        logger.info("Datums met een eerder gevonden slot (boekingsgeschiedenis): %s", ", ".join(sorted(dates)))
-    return dates
-
-
 def open_dates(booking_cfg: dict, skip_dates: set[str], now: datetime | None = None) -> list[str]:
     """Doeldatums (alle gekozen weekdagen, weeks_ahead weken vooruit) zonder boeking."""
     dates = upcoming_booking_dates(
@@ -421,8 +398,8 @@ async def main_async(debug: bool, dry_run: bool, target: dict | None = None) -> 
     logger.info("Padel Booking Orchestrator gestart")
     logger.info("=" * 60)
 
-    # Al geboekt: reserveringen in je account + datums waarvoor de bot al een slot vond
-    skip_dates = _load_account_dates(config) | load_handled_dates(history_file)
+    # Al geboekt = reserveringen in je account (future_bookings.json); de boekingsgeschiedenis telt niet mee
+    skip_dates = _load_account_dates(config)
     providers = enabled_providers(config)
 
     if target:
