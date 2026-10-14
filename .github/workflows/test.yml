@@ -34,24 +34,29 @@ jobs:
   integration-test:
     name: Integratietest (met credentials)
     runs-on: ubuntu-latest
-    if: ${{ secrets.KNLTB_EMAIL != '' }}
+    # `secrets` mag niet in een job-level `if` — daarom via env en per stap
+    env:
+      KNLTB_EMAIL: ${{ secrets.KNLTB_EMAIL }}
+      KNLTB_PASSWORD: ${{ secrets.KNLTB_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
+        if: env.KNLTB_EMAIL != ''
 
       - uses: actions/setup-python@v5
+        if: env.KNLTB_EMAIL != ''
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Installeer dependencies
+        if: env.KNLTB_EMAIL != ''
         run: pip install -r requirements.txt
 
       - name: Installeer Playwright Chromium
+        if: env.KNLTB_EMAIL != ''
         run: playwright install chromium --with-deps
 
       - name: Draai integratietest
-        env:
-          KNLTB_EMAIL: ${{ secrets.KNLTB_EMAIL }}
-          KNLTB_PASSWORD: ${{ secrets.KNLTB_PASSWORD }}
+        if: env.KNLTB_EMAIL != ''
         run: pytest test_integration.py -v -s
