@@ -42,13 +42,16 @@ class ProviderSpec:
     password_env: str
     session_file_key: str
     default_session_file: str
+    # Niet leeg → provider tijdelijk uitgeschakeld, ongeacht de configuratie
+    disabled_reason: str = ""
 
 
 PROVIDERS = [
     ProviderSpec("meetandplay", True, "KNLTB_EMAIL", "KNLTB_PASSWORD",
                  "cookies_file", ".meetandplay_cookies.json"),
     ProviderSpec("playtomic", False, "PLAYTOMIC_EMAIL", "PLAYTOMIC_PASSWORD",
-                 "token_cache_file", ".playtomic_token.json"),
+                 "token_cache_file", ".playtomic_token.json",
+                 disabled_reason="API-host api.playtomic.io resolveert niet meer (DNS)"),
 ]
 
 
@@ -81,6 +84,9 @@ def enabled_providers(config: dict) -> list[tuple[ProviderSpec, dict, dict]]:
     result = []
     for spec in PROVIDERS:
         cfg = providers_config.get(spec.name, {})
+        if spec.disabled_reason:
+            logger.warning("Provider '%s' tijdelijk uitgeschakeld: %s", spec.name, spec.disabled_reason)
+            continue
         if not cfg.get("enabled", spec.enabled_by_default):
             logger.info("Provider '%s' uitgeschakeld", spec.name)
             continue
