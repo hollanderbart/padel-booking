@@ -1,3 +1,9 @@
+## 2.3.0
+
+- Feature: booking research — de GitHub Action `booking-research.yml` meet zes keer per dag per Meet & Play club tot hoe ver vooruit en vanaf welk moment banen vrijkomen, en leidt de release-strategie af (rollend op exact tijdstip, dagelijks vast uur, blok-release). Rapport: `BOOKING_WINDOWS.md` op de branch `booking-research`
+- Meet & Play `_search_clubs` kan clubs zoeken zonder datumfilter (voor de research)
+- README: uitleg over release-strategieën en bekend probleem met de Playtomic API-host (`api.playtomic.io` resolveert niet meer)
+
 ## 2.2.12
 
 - Fix: GitHub Actions workflow was ongeldig (`secrets` in een job-level `if`), waardoor CI nooit draaide. De integratietest wordt nu per stap overgeslagen als `KNLTB_EMAIL` niet als secret is ingesteld
