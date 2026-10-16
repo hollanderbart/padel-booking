@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-16T19:32+02:00",
+  "generated_at": "2026-10-17T00:55+02:00",
   "clubs": [
     {
       "club_url": "https://meetandplay.nl/club/70359",
@@ -40,6 +40,7 @@
       "strategy": "dagelijks",
       "window_days": 8,
       "release_hours": [
+        0,
         2,
         3,
         4,
