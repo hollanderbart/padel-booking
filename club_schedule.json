@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-19T00:31+02:00",
+  "generated_at": "2026-10-19T13:02+02:00",
   "clubs": [
     {
       "club_url": "https://meetandplay.nl/club/70359",
@@ -95,6 +95,174 @@
         9,
         10
       ]
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/28803",
+      "club_name": "ALTV Zoetermeer - Tennis & Padel",
+      "club_address": "Dr. J.W. Paltelaan 111, 2712 PT ZOETERMEER",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/30700",
+      "club_name": "ATC TEAN",
+      "club_address": "Prins Bernhardlaan 37, 2404 NE Alphen aan den Rijn",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/30759",
+      "club_name": "Benthuizer Tennisclub",
+      "club_address": "de Dam 7, 2731 CE BENTHUIZEN",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/73502",
+      "club_name": "De Sluipers",
+      "club_address": "Oud Reeuwijkseweg 3, 2811 KB REEUWIJK",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/71100",
+      "club_name": "G.L.T.C. Be Quick",
+      "club_address": "Sportlaan 6A, 2806 HC Gouda",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/71084",
+      "club_name": "Goudse Tennis en Padel Club Ad Astra",
+      "club_address": "Groen van Prinsterersingel 50, 2805 TE GOUDA",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/71258",
+      "club_name": "H.T.P.C. Bergvliet",
+      "club_address": "Provincialeweg West 3A, 2851 EH HAASTRECHT",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/32250",
+      "club_name": "Sassenheimse T.V",
+      "club_address": "Roodemolenweg 6, 2171 AX Sassenheim",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/32201",
+      "club_name": "T.P.C. Rijpwetering",
+      "club_address": "Oud Adeselaan 54, 2375 XE Rijpwetering",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/81901",
+      "club_name": "T.P.V. De Heksenmeppers",
+      "club_address": "Touwslag 4, 3421 JG Oudewater",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/31534",
+      "club_name": "T.P.V. Zuid-West",
+      "club_address": "Schubertlaan 133, 2324 CR LEIDEN",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/30858",
+      "club_name": "T.V. Boskoop",
+      "club_address": "Mendelweg 14a, 2771 TN BOSKOOP",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/32409",
+      "club_name": "T.V. Forescate",
+      "club_address": "van Wassenaerlaantje 1, 2254 BK VOORSCHOTEN",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/30676",
+      "club_name": "T.V. Nieuwe Sloot",
+      "club_address": "Sportlaan 4, 2406 LD Alphen aan den Rijn",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/31484",
+      "club_name": "T.V. Stevenshof",
+      "club_address": "Dobbedreef 1B, 2331 BW LEIDEN",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/30601",
+      "club_name": "T.V. Ter Aar",
+      "club_address": "Vosholstraat 29, 2461 AB TER AAR",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/70466",
+      "club_name": "TC Capelle",
+      "club_address": "Capelseweg 35, 2907 XA Capelle aan den IJssel",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/70396",
+      "club_name": "TOGB",
+      "club_address": "Het Hoge Land 23, 2652 EA Berkel en Rodenrijs",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/83709",
+      "club_name": "TV VEP",
+      "club_address": "Talma-lanen 47B, 3445 TH Woerden",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/32417",
+      "club_name": "Vereniging Tennis- en Padelpark Adegeest",
+      "club_address": "Weddeloop 4, 2253 ST Voorschoten",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
+    },
+    {
+      "club_url": "https://meetandplay.nl/club/32656",
+      "club_name": "ZTPC Zoeterwoude",
+      "club_address": "Nieuweweg 10, 2381NW Zoeterwoude",
+      "strategy": "geen",
+      "window_days": null,
+      "release_hours": []
     }
   ]
 }
