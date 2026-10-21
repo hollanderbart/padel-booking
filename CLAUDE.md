@@ -55,6 +55,7 @@ Werk `README.md` bij bij wijzigingen die de gebruiker raken, zoals:
 ```
 padel-booking/
 ├── CLAUDE.md                        # deze richtlijnen
+├── .claude/skills/padel-log-analysis/  # skill: logs/state van de addon via SSH analyseren
 ├── repository.yaml                  # HA custom repository manifest
 ├── padel_booking/                   # HA addon (slug = directory naam)
 │   ├── config.yaml                  # addon manifest + versienummer

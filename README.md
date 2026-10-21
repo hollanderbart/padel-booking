@@ -545,6 +545,27 @@ Let op: in `schedule_mode: smart` hoort de addon **continu** te draaien (`state:
 `stopped`, dan worden de vrijgavemomenten gemist. Na een update van een gestopte addon start HA hem niet
 vanzelf; start hem dan handmatig (`ha apps start <slug>`) en zet eventueel de watchdog aan.
 
+### Log-analyse met Claude Code
+
+De repo bevat een Claude Code skill (`.claude/skills/padel-log-analysis/`) die bovenstaande
+SSH-toegang gebruikt voor een complete gezondheidscheck. Vraag in Claude Code bijvoorbeeld
+*"hoe gaat het met de padel booker?"* of *"waarom is donderdag niet geboekt?"*. De skill:
+
+- haalt read-only een snapshot op: status, opties, logs, state-bestanden. Wachtwoorden, cookies
+  en tokens worden al op de host weggefilterd
+- legt gemelde successen naast je echte reserveringen, zodat een onbetaalde betaallink die later
+  `Geannuleerd` is opvalt
+- controleert per dag of de nachtrun van 00:01 en de gerichte runs gedraaid hebben, telt herstarts
+  en groepeert waarschuwingen (en laat zien of ze sinds de laatste herstart nog voorkomen)
+- herstart of wijzigt nooit iets op de host
+
+De scripts kun je ook zelf draaien:
+
+```bash
+.claude/skills/padel-log-analysis/scripts/collect.sh /tmp/padel-snap 5000   # host/sleutel/slug via PADEL_HA_HOST, PADEL_HA_KEY, PADEL_ADDON_SLUG
+python3 .claude/skills/padel-log-analysis/scripts/analyze.py /tmp/padel-snap
+```
+
 ---
 
 ## Bestandsstructuur
@@ -553,6 +574,7 @@ vanzelf; start hem dan handmatig (`ha apps start <slug>`) en zet eventueel de wa
 padel-booking/
 ├── README.md
 ├── CLAUDE.md                        # ontwikkelrichtlijnen
+├── .claude/skills/padel-log-analysis/  # Claude Code skill: logs/state van de addon analyseren
 ├── repository.yaml                  # HA custom repository manifest
 ├── padel_booking/                   # HA addon
 │   ├── config.yaml                  # addon manifest + versienummer + options schema

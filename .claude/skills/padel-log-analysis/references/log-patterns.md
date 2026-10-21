@@ -1,0 +1,101 @@
+# Padel Booking — log reference
+
+Log format: `YYYY-MM-DD HH:MM:SS  LEVEL     message`. Times are Europe/Amsterdam.
+Lines prefixed `[meetandplay]` / `[playtomic]` come from a provider subprocess.
+
+## Contents
+1. Run lifecycle (what a healthy run looks like)
+2. Message catalogue: meaning and action
+3. Known pitfalls when reading the log
+
+---
+
+## 1. Run lifecycle
+
+**Smart mode** (`scheduler.py`, runs continuously):
+
+```
+Club-schema (<generated_at>): N club(s), M met bekend vrijgavemoment   ← startup / every 6h refresh
+  <club> — rollend|dagelijks, N dagen vooruit[, om HH:00 …]
+Run gestart: startrun                     ← once per addon start (so: count = restarts)
+Run gestart: nachtelijke volledige run    ← daily 00:01, preceded by fetch_bookings output
+Run gestart: vrijgave <club> (<strategy>, N d); …   ← targeted run at a release moment
+```
+
+A targeted run that books nothing is retried at +1 min and +5 min (`RETRY_DELAYS`), which is
+why release runs show up in triples (`HH:00:05`, `HH:01:05`, `HH:05:05`).
+
+**Nightly mode** (`run.sh`, one run per addon start): `fetch_bookings.py`, then the orchestrator,
+with no `Run gestart` lines.
+
+**Orchestrator** (both modes), one run:
+
+```
+Padel Booking Orchestrator gestart
+Al geboekte datums uit future_bookings: …
+skip_booked_dates ingeschakeld — N datum(s) worden overgeslagen
+Provider 'meetandplay' ingeschakeld | uitgeschakeld | tijdelijk uitgeschakeld: <reason>
+[Gerichte run: <dates> bij <clubs>]
+Nog te boeken: <dates>
+Provider 'meetandplay' gestart...
+  [meetandplay] … search, slot filtering, cart, payment page …
+Provider 'meetandplay' meldt succes: <club> op <date>   | meldt geen boeking: <reason>
+Booking state opgeslagen / Boekingsgeschiedenis bijgewerkt / HA push notificatie verzonden
+Verder zoeken voor: <dates>               ← keeps going for remaining dates
+N boeking(en) gevonden … | WARNING Geen boeking gemaakt door alle providers
+```
+
+**fetch_bookings** (before every full run): `Meet & Play reserveringen ophalen` →
+`N reserveringskaart(en) op 'Aankomend'` → `Reservering gevonden: <club> op <date> om <time> (<status>)`
+or `Reservering op <date> overgeslagen (status: Geannuleerd|…)` → `N boeking(en) geschreven naar …`.
+
+## 2. Message catalogue
+
+| Message (substring) | Meaning | Action |
+|---|---|---|
+| `meldt succes` + `Betaalprovider-URL: …mollie…` | Slot in cart, payment link sent by push | User must pay. Not a booking until it shows as `Betaald` in fetch_bookings |
+| `Reservering op X overgeslagen (status: Geannuleerd)` | Reservation lapsed or was cancelled, usually an unpaid payment link | Highlight: the user may think X is booked. Bot will retry X |
+| `Geen boeking gemaakt door alle providers` | Nothing suitable free | Normal on its own |
+| `Beschikbare starttijden bij <club>: … — binnen venster: geen` | Club has slots, none in the time window | Normal; useful to show "near misses" |
+| `<club> overgeslagen: X km (straal N km)` | Own distance filter (v2.7.0) | Explains why a club is never tried |
+| `Gerichte run overgeslagen — X al geboekt` | Release run for an already-booked date | Normal |
+| `Provider 'playtomic' tijdelijk uitgeschakeld: … (DNS)` | Hard-coded kill switch (`disabled_reason`) | Since v2.6.2 only logged when Playtomic is enabled; before that, noise |
+| `Meet & Play sessie verlopen — opnieuw inloggen...` → `Automatisch inloggen gelukt!` | Session cookie expired, re-login OK | Normal |
+| `Automatisch inloggen mislukt` / `Fout tijdens automatisch inloggen` / `Geen wachtwoordveld gevonden op SSO pagina` | KNLTB SSO login broken (credentials or page changed) | Serious: no searching possible. Check `debug_login_failed.png` mtime |
+| `Doorgestuurd naar loginpagina tijdens boeking` | Session died mid-booking | Serious if it repeats |
+| `Livewire datum-component niet gevonden` / `'Toevoegen…'-knop niet gevonden` / `'Afrekenen'-knop niet gevonden` / `TOS checkbox niet gevonden` / `Betaalknop niet gevonden` | Meet & Play page structure changed | Code fix in `providers/meetandplay/booking.py` likely |
+| `Betaalpagina niet bereikt na klik` followed by a Mollie URL on attempt 2 | Retry worked | Noise |
+| `Geen betaallink — slot telt niet als geboekt` | Cart reached but no payment URL | Slot not reserved; investigate if it repeats |
+| `openstaande reservering in deze sessie` (PendingReservationError) | An earlier unpaid cart blocks a new one; provider opens a fresh session | Fine if followed by success |
+| `Geen clubs gevonden met de opgegeven filters` / `0 club(s) gevonden` | Search filters/radius/city wrong, or search page broken | Check options; serious if sudden |
+| `Geen clubcoördinaten op de zoekpagina` | Distance filter can't work | Code fix |
+| `Run duurde langer dan 15 minuten en is afgebroken` | Orchestrator killed | Check what hung (browser wait loops) |
+| `Run mislukt` + traceback | Scheduler-level exception, but the scheduler keeps running | Read traceback |
+| `Club-schema ophalen mislukt (…) — cache gebruiken` | GitHub raw fetch failed | Fine short-term; check `generated_at` |
+| `Geen club-schema beschikbaar` | No cache either, so only nightly runs | Serious in smart mode |
+| `HA push notificatie mislukt` | User never gets the payment link | Serious: check `ha_notify_device_id` |
+| `Ophalen mislukt voor … — future_bookings.json niet bijgewerkt` | Account fetch failed; skip list is stale | May cause double bookings or skipped dates |
+
+## 3. Pitfalls
+
+- **Provider timestamps are relay times.** The orchestrator collects the provider's stderr
+  and logs it all when the subprocess exits, so every `[meetandplay]` line of one run has the
+  same timestamp (when the provider finished). Don't read durations from them; use
+  `Provider … gestart` → `meldt …`.
+- **Collisions drop scheduled runs.** The scheduler is single-threaded: while a run and its
+  retries (up to ~+6 min) are executing, other due runs wait, and anything more than
+  `DUE_GRACE` (2 min) late is silently dropped. Seen in practice: a targeted 00:00 release run
+  with retries swallowed the 00:01 nightly run, including that night's `fetch_bookings`. A day
+  without a nightly run in the fact sheet is the symptom; check `scheduler.py` (`DUE_GRACE`,
+  `run_forever`) before calling it a new bug.
+- **`.booking_state.json` and `booking_history.json` record claims, not bookings.** They are
+  written on `meldt succes`. Since v2.6.0 only `future_bookings.json` counts as "booked".
+- **`last_run.json` `success: false`** just means the latest run booked nothing. Normal most of
+  the time.
+- **Duplicate claims for the same date** (e.g. two successes for one date hours apart) mean
+  the first payment link lapsed and the bot booked again. The user may have received
+  several payment pushes.
+- **Config changes mid-window** show as different `Config geladen: …` lines; outcomes before
+  and after aren't comparable.
+- **Log retention:** `ha apps logs` reads the host journal, which survives addon restarts and
+  updates. The window is limited by `-n` and journal size, so for older dates raise `-n` first.
