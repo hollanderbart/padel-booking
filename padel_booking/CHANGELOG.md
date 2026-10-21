@@ -1,3 +1,7 @@
+## 2.7.3
+
+- Security: `python-dotenv` bijgewerkt naar 1.2.2 (Dependabot-melding over `set_key` en symlinks). De addon gebruikt alleen `load_dotenv`, dus was niet kwetsbaar; dit houdt de dependency actueel
+
 ## 2.7.2
 
 - Privacy: de standaardcoördinaten (`location_latitude`/`location_longitude`) zijn afgerond naar het centrum van Boskoop (`52.07`, `4.66`) en voorbeeld-device-ID's zijn neutraal gemaakt. Bestaande installaties houden hun eigen instellingen — er verandert niets aan je configuratie
