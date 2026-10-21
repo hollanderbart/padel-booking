@@ -29,6 +29,20 @@ ENV/
 # Session data
 .session_cookies.json
 
+# Sessies, tokens en state van lokale runs (config.yaml schrijft ze in de repo root).
+# Bevatten inlogsessies / persoonlijke boekingen — nooit committen.
+.meetandplay_cookies.json
+.meetandplay_club_coords.json
+.playtomic_token.json
+.booking_state.json
+booking_history.json*
+future_bookings.json
+last_run.json
+/club_schedule.json
+debug_*.png
+debug_*.html
+options.json
+
 # Environment variables
 .env
 .env.local
