@@ -1,3 +1,7 @@
+## 2.7.1
+
+- Fix (planner, `schedule_mode: smart`): een run die viel terwijl een andere run nog bezig was, werd stil overgeslagen. Zo verdween de nachtrun van 00:01 (inclusief het ophalen van je reserveringen) als er om 00:00 een gerichte run met retries liep. Gemiste runs worden nu direct daarna ingehaald. Meerdere gemiste runs worden samengevoegd tot één run, en tot een volledige run als er een volledige tussen zit. Dit geldt ook voor runs die vallen tijdens de startrun
+
 ## 2.7.0
 
 - Feature (Meet & Play): `location_radius_km` werkt nu met elke waarde (bijv. 15). De zoekpagina gebruikt de eerstvolgende dropdownstap (20 km) en de addon rekent per club de hemelsbrede afstand na vanaf `location_latitude`/`location_longitude`; clubs verder weg worden overgeslagen. Dat geldt ook voor de gerichte runs op het vrijgavemoment (coördinaten bewaard in `/config/padel/.meetandplay_club_coords.json`)

@@ -21,7 +21,7 @@ import logging
 import subprocess
 import sys
 import time as time_mod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -48,7 +48,7 @@ RELEASE_DELAY = timedelta(seconds=5)       # kleine marge na het vrijgavemoment
 RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=5))
 SLOT_STEP_MIN = 30                         # Meet & Play starttijden liggen op een half-uur-raster
 MAX_SLEEP = 60                             # seconden; korte slaapstappen vangen klokwijzigingen op
-DUE_GRACE = timedelta(minutes=2)           # een run die net gemist is, wordt alsnog gedaan
+LATE_AFTER = timedelta(minutes=2)          # later gestart = ingehaald: gelogd, retries tellen vanaf nu
 
 ROLLING = "rollend"
 DAILY = "dagelijks"
@@ -134,6 +134,26 @@ def plan_runs(schedule: dict, booking_cfg: dict, since: datetime, until: datetim
     if nightly <= until:
         runs.append(PlannedRun(nightly, reason="nachtelijke volledige run"))
     return sorted(runs, key=lambda r: r.at)
+
+
+def next_due(planned: list[PlannedRun], now: datetime) -> tuple[PlannedRun | None, list[PlannedRun]]:
+    """
+    Kies de run die nu moet draaien uit `planned` (gesorteerd, nog niet uitgevoerd).
+
+    Geeft (run, gedekte runs) terug. Zijn er meerdere runs aan de beurt — bijvoorbeeld omdat
+    ze vielen terwijl een eerdere run (met retries) nog liep — dan worden ze samengevoegd tot
+    één run nu: een volledige run als er één tussen zit (die dekt alle datums en clubs),
+    anders één gerichte run over alle datums en clubs samen.
+    """
+    due = [r for r in planned if r.at <= now]
+    if len(due) <= 1:
+        return (due[0] if due else None), due
+    missed = ", ".join(f"{r.at:%H:%M}" for r in due)
+    if any(not r.dates for r in due):
+        return PlannedRun(now, reason=f"ingehaalde volledige run (gemist: {missed})"), due
+    dates = tuple(sorted({d for r in due for d in r.dates}))
+    clubs = tuple(sorted({c for r in due for c in r.clubs}))
+    return PlannedRun(now, dates, clubs, f"ingehaald ({missed}): " + "; ".join(r.reason for r in due)), due
 
 
 # ---------------------------------------------------------------------------
@@ -231,10 +251,14 @@ def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug
     schedule = load_schedule(url, cache_file, local_file)
     describe_schedule(schedule)
     loaded_at = datetime.now(TZ)
+    # Alle geplande runs tot en met `checked_until` zijn uitgevoerd (of gedekt door de startrun).
+    # Pas als er niets meer openstaat schuift dit op, zodat runs die vallen terwijl een andere
+    # run nog bezig is daarna alsnog gedaan worden in plaats van stil te verdwijnen.
+    checked_until = datetime.now(TZ)
     done: set[datetime] = set()
 
     # Zelfde gedrag als vroeger bij het starten van de addon: direct één volledige run
-    execute(PlannedRun(datetime.now(TZ), reason="startrun"), config, debug)
+    execute(PlannedRun(checked_until, reason="startrun"), config, debug)
 
     while True:
         now = datetime.now(TZ)
@@ -243,21 +267,26 @@ def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug
             describe_schedule(schedule)
             loaded_at = now
 
-        due = [r for r in plan_runs(schedule, booking_cfg, now - DUE_GRACE, now + timedelta(days=1)) if r.at not in done]
-        if not due:
-            time_mod.sleep(MAX_SLEEP)
-            continue
-        nxt = due[0]
-        if nxt.at > now:
-            time_mod.sleep(min(MAX_SLEEP, (nxt.at - now).total_seconds()))
+        planned = [r for r in plan_runs(schedule, booking_cfg, checked_until, now + timedelta(days=1))
+                   if r.at not in done]
+        run, covered = next_due(planned, now)
+        if run is None:
+            checked_until = now
+            done = {at for at in done if at > checked_until}
+            wait = (planned[0].at - now).total_seconds() if planned else MAX_SLEEP
+            time_mod.sleep(min(MAX_SLEEP, wait))
             continue
 
+        late = now - covered[0].at
+        if late > LATE_AFTER:
+            logger.info("Run van %s wordt ingehaald (%d min te laat)",
+                        ", ".join(f"{r.at:%H:%M}" for r in covered), late.total_seconds() // 60)
+            run = replace(run, at=now)
         try:
-            execute(nxt, config, debug)
+            execute(run, config, debug)
         except Exception:  # noqa: BLE001 — de planner moet blijven draaien
             logger.exception("Run mislukt")
-        done.add(nxt.at)
-        done = {at for at in done if at > now - timedelta(days=1)}
+        done.update(r.at for r in covered)
 
 
 def print_plan(config: dict, schedule: dict, days: int = 7) -> None:

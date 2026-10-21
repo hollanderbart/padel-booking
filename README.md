@@ -314,7 +314,10 @@ cache in `/config/padel/club_schedule.json`) en plant voor elke doeldag (alle `b
   precies op het vrijgavemoment starten (ze gebruiken de reserveringen van de laatste volledige run)
 
 Een gerichte run gaat direct naar de clubpagina (geen zoekpagina) en wordt na 1 en 5 minuten herhaald
-als er nog niets vrij was. Clubs met strategie "onvoldoende data" of "blok" worden alleen door de
+als er nog niets vrij was. Runs draaien na elkaar: valt een run terwijl een andere nog bezig is (bijv. de
+nachtrun van 00:01 tijdens een gerichte run van 00:00 met retries), dan wordt hij direct daarna ingehaald
+(`Run van … wordt ingehaald` in de log). Zijn er meerdere gemist, dan worden ze samengevoegd tot één run.
+Zit er een volledige run tussen, dan wordt het één volledige run. Clubs met strategie "onvoldoende data" of "blok" worden alleen door de
 nachtelijke run gedekt. Let op: een club met een venster groter dan `weeks_ahead` weken (bijv. 30 dagen
 bij `weeks_ahead: 4`) geeft zijn banen vrij vóórdat de doeldag binnen het zoekbereik valt; met de
 standaard `weeks_ahead: 5` vallen vensters tot 35 dagen binnen bereik.

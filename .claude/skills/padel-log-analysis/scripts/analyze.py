@@ -155,7 +155,8 @@ def report_runs(entries: list) -> None:
     while day <= last_day:
         rs = by_day.get(day, [])
         full = [r for r in rs if not r["reason"].startswith("vrijgave")]
-        nightly = any(r["reason"] in NIGHTLY_REASONS and r["start"].hour == 0 for r in rs)
+        nightly = any((r["reason"] in NIGHTLY_REASONS or r["reason"].startswith("ingehaalde volledige run"))
+                      and r["start"].hour == 0 for r in rs)
         outcomes = Counter(r["outcome"] or "onbekend/lopend" for r in rs)
         print(f"| {day} {day:%a} | {len(rs)} | {len(full)} | {len(rs) - len(full)} | "
               f"{', '.join(f'{k}: {v}' for k, v in outcomes.most_common())} | {'ja' if nightly else 'NEE'} |")
