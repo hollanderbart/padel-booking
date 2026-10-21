@@ -6,8 +6,9 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 
-from providers.meetandplay.session import SessionManager
+from providers.meetandplay.session import SessionManager, SiteUnreachableError
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +255,21 @@ class TestAutoLogin:
             result, ok = m.auto_login(browser, "a@b.nl", "pw")
 
         assert (result, ok) == (None, False)
+        context.close.assert_called_once()
+
+    def test_netwerkfout_geeft_site_unreachable_zonder_screenshot(self, tmp_path):
+        m = _make_manager(tmp_path)
+        page = _make_page()
+        page.goto.side_effect = Exception(
+            "Page.goto: net::ERR_CONNECTION_REFUSED at https://www.meetandplay.nl/inloggen"
+        )
+        browser, context = _login_browser(page)
+
+        with patch("providers.meetandplay.session.save_debug_screenshot") as screenshot, \
+                pytest.raises(SiteUnreachableError, match="ERR_CONNECTION_REFUSED.*geen inlogprobleem"):
+            m.auto_login(browser, "a@b.nl", "pw")
+
+        screenshot.assert_not_called()
         context.close.assert_called_once()
 
     def test_exception_tijdens_login_geeft_false(self, tmp_path):

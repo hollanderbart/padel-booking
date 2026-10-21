@@ -1,3 +1,7 @@
+## 2.8.1
+
+- Fix (Meet & Play): was de site onbereikbaar (bijv. `net::ERR_CONNECTION_REFUSED` tijdens een storing), dan meldde de addon "Automatisch inloggen mislukt. Controleer KNLTB_EMAIL/KNLTB_PASSWORD" en overschreef `debug_login_failed.png` met Chromiums foutpagina. Nu staat er `Meet & Play niet bereikbaar (net::ERR_…) — storing of netwerkprobleem, geen inlogprobleem`, zonder traceback, en blijft de screenshot van de laatste echte inlogfout bewaard
+
 ## 2.8.0
 
 - Planner (`schedule_mode: smart`): clubs buiten `location_radius_km` krijgen geen gerichte runs meer. De booker sloeg ze al over, dus zulke runs deden niets en konden de nachtrun ophouden (bijv. een run om 00:00 voor alleen My Padel Club Krimpen). De planner gebruikt dezelfde clubcoördinaten als de booker (`/config/padel/.meetandplay_club_coords.json`); clubs met een onbekende locatie blijven ingepland. In de log: `<club> buiten straal: X km (straal N km) — niet gepland`

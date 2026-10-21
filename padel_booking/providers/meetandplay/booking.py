@@ -27,7 +27,12 @@ from providers.meetandplay.coords import (
     load_club_coords,
     save_club_coords,
 )
-from providers.meetandplay.session import SessionManager, accept_cookie_banner, save_debug_page
+from providers.meetandplay.session import (
+    SessionManager,
+    SiteUnreachableError,
+    accept_cookie_banner,
+    save_debug_page,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -722,6 +727,9 @@ class MeetAndPlayBooker:
 
                 return self._try_dates_and_clubs(page, booking_dates, clubs)
 
+            except SiteUnreachableError as e:
+                logger.warning("%s", e)
+                return _failure(str(e))
             except Exception as e:  # noqa: BLE001 — subprocess moet altijd een ProviderResult geven
                 logger.exception("Onverwachte fout in Meet & Play provider")
                 return _failure(str(e))

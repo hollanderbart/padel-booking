@@ -429,6 +429,18 @@ Bij de upgrade van v1 (knltb_padel_booking) naar v2 (padel_booking) moet je:
 1. Controleer `knltb_email` en `knltb_password` in de Configuration tab
 2. Bekijk de debug screenshot via **File Editor**: `/config/padel/debug_login_failed.png`
 
+### Meet & Play niet bereikbaar
+
+```
+Meet & Play niet bereikbaar (net::ERR_CONNECTION_REFUSED) — storing of netwerkprobleem, geen inlogprobleem
+```
+
+De site gaf geen verbinding, dus het inloggen is niet eens begonnen. Je credentials zijn niet het probleem.
+Opent meetandplay.nl ook in je browser niet, dan is het een storing bij Meet & Play: de addon probeert het
+bij de volgende geplande run vanzelf opnieuw. Werkt de site in je browser wel, kijk dan naar het netwerk van
+je HA host, bijv. een DNS-blocker (AdGuard, Pi-hole) die `meetandplay.nl` blokkeert (`ERR_NAME_NOT_RESOLVED`
+of een verbinding naar `0.0.0.0`). Sinds v2.8.1 overschrijft zo'n storing `debug_login_failed.png` niet meer.
+
 ### Login mislukt (Playtomic)
 
 - Controleer `playtomic_email` en `playtomic_password`

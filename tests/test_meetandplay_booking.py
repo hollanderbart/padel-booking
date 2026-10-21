@@ -504,6 +504,24 @@ class TestMeetAndPlayBookerRun:
         assert result.success is False
         assert "Chromium niet gevonden" in result.error
 
+    def test_site_onbereikbaar_geeft_duidelijke_fout_zonder_traceback(self, caplog):
+        from providers.meetandplay.session import SiteUnreachableError
+
+        booker = _make_booker(_make_request(weeks_ahead=1))
+        mock_pw = MagicMock()
+        mock_pw.__enter__ = MagicMock(return_value=mock_pw)
+        mock_pw.__exit__ = MagicMock(return_value=False)
+        error = SiteUnreachableError("Meet & Play niet bereikbaar (net::ERR_CONNECTION_REFUSED)")
+
+        with patch("providers.meetandplay.booking.sync_playwright", return_value=mock_pw), \
+                patch.object(booker, "_ensure_logged_in", side_effect=error):
+            result = booker.run()
+
+        assert result.success is False
+        assert "niet bereikbaar" in result.error
+        assert "KNLTB_PASSWORD" not in result.error
+        assert not any(r.exc_info for r in caplog.records)
+
 
 # ---------------------------------------------------------------------------
 # _book_timeslot — winkelwagen → afrekenen → betaallink

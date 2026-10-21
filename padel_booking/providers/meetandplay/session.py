@@ -23,6 +23,12 @@ CONTEXT_OPTIONS = {"viewport": {"width": 1920, "height": 1080}, "user_agent": US
 DEBUG_DIR = Path("/config/padel")
 
 SUBMIT_SELECTOR = 'button[type="submit"], input[type="submit"]'
+# Chromium-netwerkfout (ERR_CONNECTION_REFUSED, ERR_NAME_NOT_RESOLVED, …): de site is onbereikbaar
+NETWORK_ERROR_RE = re.compile(r"net::ERR_[A-Z_]+")
+
+
+class SiteUnreachableError(RuntimeError):
+    """meetandplay.nl of de KNLTB-login is niet bereikbaar (storing/netwerk) — geen inlogprobleem."""
 SSO_PASSWORD_SELECTOR = 'input[type="password"], input[name="Password"], input[name="password"]'
 
 
@@ -157,6 +163,15 @@ class SessionManager:
                 self._login_sso(page, email, password)
             login_ok = self.is_logged_in(page)
         except Exception as e:  # noqa: BLE001
+            if network_error := NETWORK_ERROR_RE.search(str(e)):
+                # Geen debug-screenshot: dat zou Chromiums foutpagina worden en de schermafdruk
+                # van de laatste echte inlogfout overschrijven
+                page.close()
+                context.close()
+                raise SiteUnreachableError(
+                    f"Meet & Play niet bereikbaar ({network_error.group(0)}) — storing of netwerkprobleem, "
+                    "geen inlogprobleem"
+                ) from e
             logger.error("Fout tijdens automatisch inloggen: %s", e)
             login_ok = False
 
