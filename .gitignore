@@ -43,6 +43,9 @@ debug_*.png
 debug_*.html
 options.json
 
+# Lokale Claude Code instellingen (o.a. PADEL_HA_HOST met het adres van de HA host)
+.claude/settings.local.json
+
 # Environment variables
 .env
 .env.local

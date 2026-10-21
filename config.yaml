@@ -2,8 +2,8 @@ location:
   city: Boskoop
   radius_km: 20
   # Coördinaten voor Playtomic (vereist als playtomic.enabled: true)
-  latitude: 52.0738
-  longitude: 4.6567
+  latitude: 52.07
+  longitude: 4.66
 
 booking:
   days: [thursday]      # één of meer weekdagen, bijv. [tuesday, thursday]

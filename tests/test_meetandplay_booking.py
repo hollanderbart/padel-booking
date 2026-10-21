@@ -811,7 +811,7 @@ class TestDistanceOption:
         assert _distance_option(radius) == expected
 
 
-BOSKOOP = [52.0738, 4.6567]
+BOSKOOP = [52.07, 4.66]
 SEARCH_HTML = (
     '<div wire:snapshot="{&quot;clubs&quot;:[{&quot;id&quot;:1,&quot;slug&quot;:&quot;88191&quot;,'
     '&quot;name&quot;:&quot;Hal 0172&quot;,&quot;latitude&quot;:&quot;52.1550&quot;,&quot;longitude&quot;:&quot;4.7650&quot;},'

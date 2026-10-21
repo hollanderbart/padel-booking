@@ -17,7 +17,7 @@ set -euo pipefail
 
 OUT=${1:?usage: collect.sh <out_dir> [log_lines]}
 LINES=${2:-5000}
-HOST=${PADEL_HA_HOST:-root@192.168.2.5}
+HOST=${PADEL_HA_HOST:-root@homeassistant.local}
 KEY=${PADEL_HA_KEY:-$HOME/.ssh/id_ed25519_ha}
 SLUG=${PADEL_ADDON_SLUG:-a30a93bf_padel_booking}
 DIR=/config/padel

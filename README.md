@@ -61,8 +61,8 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 | `ha_notify_device_id` | Device ID voor push notificaties (optioneel) |
 | `location_city` | Stad om clubs in te zoeken (bijv. `Boskoop`) |
 | `location_radius_km` | Zoekradius in kilometers (hemelsbreed vanaf `location_latitude`/`location_longitude`). Elke waarde werkt, bijv. 15: Meet & Play zoekt met de eerstvolgende stap uit de dropdown (5, 10, 20, 50 … km) en de addon laat clubs verder dan je straal zelf vallen |
-| `location_latitude` | Breedtegraad voor Playtomic zoeken (bijv. `52.0738`) |
-| `location_longitude` | Lengtegraad voor Playtomic zoeken (bijv. `4.6567`) |
+| `location_latitude` | Breedtegraad voor Playtomic zoeken (bijv. `52.07`) |
+| `location_longitude` | Lengtegraad voor Playtomic zoeken (bijv. `4.66`) |
 | `booking_days` | Eén of meer weekdagen om te boeken, bijv. `thursday` of `tuesday` + `thursday` (standaard `thursday`). Vervangt `booking_day` uit versies vóór 2.5.0 — na de update staat `booking_days` op `thursday`; controleer dit als je een andere dag had |
 | `booking_time_start` | Vroegste starttijd (bijv. `19:30`) |
 | `booking_time_end` | Laatste starttijd (bijv. `21:00`) |
@@ -81,7 +81,7 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 **`ha_notify_device_id`** vind je via:
 **Developer Tools → Actions → zoek op `notify.mobile_app`**
 
-De naam van de service is bijv. `notify.mobile_app_iphone_van_bart_2` → device ID is `iphone_van_bart_2`.
+De naam van de service is bijv. `notify.mobile_app_mijn_telefoon` → device ID is `mijn_telefoon`.
 
 **Playtomic coördinaten** vind je eenvoudig via [maps.google.com](https://maps.google.com) — klik rechts op je locatie en kopieer de coördinaten.
 
@@ -491,7 +491,7 @@ pagina:
 
 ```bash
 $SSH "ls -l /config/padel/debug_payment_failed.*"
-scp -i ~/.ssh/id_ed25519_ha root@192.168.2.5:/config/padel/debug_payment_failed.png .
+scp -i ~/.ssh/id_ed25519_ha root@homeassistant.local:/config/padel/debug_payment_failed.png .
 ```
 
 ### Script vindt geen banen

@@ -1,5 +1,5 @@
 name: "Padel Booking"
-version: "2.7.1"
+version: "2.7.2"
 slug: "padel_booking"
 description: "Automatisch padelbanen boeken op meetandplay.nl en Playtomic"
 arch:
@@ -18,8 +18,8 @@ options:
   ha_notify_device_id: ""
   location_city: "Boskoop"
   location_radius_km: 20
-  location_latitude: 52.0738
-  location_longitude: 4.6567
+  location_latitude: 52.07
+  location_longitude: 4.66
   booking_days:
     - "thursday"
   booking_time_start: "19:30"

@@ -116,16 +116,24 @@ De addon is geïnstalleerd via de GitHub-repository, dus de slug is `a30a93bf_pa
 
 De `home-assistant` MCP-server geeft alleen Assist-tools (geen logs). Gebruik SSH via de
 **Terminal & SSH** addon (`core_ssh`, poort 22). De sleutel `~/.ssh/id_ed25519_ha` (zonder
-wachtwoord) staat in `authorized_keys`, dus non-interactief werkt:
+wachtwoord) staat in `authorized_keys`, dus non-interactief werkt.
+
+Het adres van de host staat **niet** in de repo (publiek): het staat als `PADEL_HA_HOST`
+(bijv. `root@<ip>`) in `.claude/settings.local.json` onder `env` — lokaal en in `.gitignore`.
+Zet nooit IP-adressen, device ID's, e-mailadressen of coördinaten van de eigenaar in
+bestanden die gecommit worden.
 
 ```bash
-SSH="ssh -i ~/.ssh/id_ed25519_ha -o IdentitiesOnly=yes -o BatchMode=yes root@192.168.2.5"
+# Array: zsh splitst "$SSH" niet op spaties
+SSH=(ssh -i ~/.ssh/id_ed25519_ha -o IdentitiesOnly=yes -o BatchMode=yes "${PADEL_HA_HOST:-root@homeassistant.local}")
 
-$SSH "ha apps logs a30a93bf_padel_booking"            # log van de laatste/lopende run
-$SSH "ha apps info a30a93bf_padel_booking --raw-json | jq '.data | {state, boot, watchdog, version}'"
-$SSH "ha apps list"                                   # alle addons + slugs
-$SSH "cat /config/padel/last_run.json"                # state-bestanden
+"${SSH[@]}" "ha apps logs a30a93bf_padel_booking -n 500"   # log (standaard maar 100 regels)
+"${SSH[@]}" "ha apps info a30a93bf_padel_booking --raw-json | jq '.data | {state, boot, watchdog, version}'"
+"${SSH[@]}" "ha apps list"                                 # alle addons + slugs
+"${SSH[@]}" "cat /config/padel/last_run.json"              # state-bestanden
 ```
+
+Voor een volledige analyse: de skill `padel-log-analysis`.
 
 - Host heeft **geen python3** — gebruik `jq` voor JSON
 - Gebruik `ha apps …`; `ha addons …` is de oude naam

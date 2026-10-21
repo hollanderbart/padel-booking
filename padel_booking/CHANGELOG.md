@@ -1,3 +1,7 @@
+## 2.7.2
+
+- Privacy: de standaardcoördinaten (`location_latitude`/`location_longitude`) zijn afgerond naar het centrum van Boskoop (`52.07`, `4.66`) en voorbeeld-device-ID's zijn neutraal gemaakt. Bestaande installaties houden hun eigen instellingen — er verandert niets aan je configuratie
+
 ## 2.7.1
 
 - Fix (planner, `schedule_mode: smart`): een run die viel terwijl een andere run nog bezig was, werd stil overgeslagen. Zo verdween de nachtrun van 00:01 (inclusief het ophalen van je reserveringen) als er om 00:00 een gerichte run met retries liep. Gemiste runs worden nu direct daarna ingehaald. Meerdere gemiste runs worden samengevoegd tot één run, en tot een volledige run als er een volledige tussen zit. Dit geldt ook voor runs die vallen tijdens de startrun
