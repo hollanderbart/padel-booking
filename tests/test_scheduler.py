@@ -5,6 +5,9 @@ Unit tests voor scheduler.py — planning van gerichte runs op vrijgavemomenten.
 import json
 from datetime import date, datetime, timedelta
 
+import pytest
+
+import scheduler
 from scheduler import (
     DAILY,
     RELEASE_DELAY,
@@ -12,6 +15,7 @@ from scheduler import (
     TZ,
     PlannedRun,
     load_schedule,
+    next_due,
     next_nightly,
     plan_runs,
     release_moments,
@@ -92,6 +96,97 @@ class TestNextNightly:
 
     def test_morgen_als_al_geweest(self):
         assert next_nightly(NOW) == datetime(2026, 10, 15, 0, 1, tzinfo=TZ)
+
+
+class TestNextDue:
+    TARGETED = PlannedRun(NOW, ("2026-10-22",), (("Rol", "https://r", "A"),), "vrijgave Rol")
+    OTHER = PlannedRun(NOW + timedelta(minutes=1), ("2026-10-29",), (("Dag", "https://d", "B"),), "vrijgave Dag")
+    NIGHTLY = PlannedRun(NOW + timedelta(minutes=2), reason="nachtelijke volledige run")
+
+    def test_niets_aan_de_beurt(self):
+        assert next_due([self.TARGETED], NOW - timedelta(seconds=1)) == (None, [])
+
+    def test_een_run_aan_de_beurt_blijft_ongewijzigd(self):
+        assert next_due([self.TARGETED, self.OTHER], NOW) == (self.TARGETED, [self.TARGETED])
+
+    def test_gemiste_runs_met_volledige_run_worden_een_volledige_run(self):
+        later = NOW + timedelta(minutes=6)
+        run, covered = next_due([self.TARGETED, self.NIGHTLY], later)
+        assert covered == [self.TARGETED, self.NIGHTLY]
+        assert run.at == later and not run.dates
+        assert "ingehaalde volledige run" in run.reason
+
+    def test_gemiste_gerichte_runs_worden_samengevoegd(self):
+        later = NOW + timedelta(minutes=6)
+        run, covered = next_due([self.TARGETED, self.OTHER], later)
+        assert covered == [self.TARGETED, self.OTHER]
+        assert run.dates == ("2026-10-22", "2026-10-29")
+        assert {name for name, _, _ in run.clubs} == {"Rol", "Dag"}
+
+
+class _StopLoop(Exception):
+    pass
+
+
+class TestRunForever:
+    def _simulate(self, monkeypatch, start: datetime, until: datetime, durations: dict[str, timedelta]):
+        """Draai run_forever met een nepklok; execute duurt per soort run `durations` lang."""
+        clock = [start]
+        executed: list[tuple[datetime, PlannedRun]] = []
+
+        class FakeDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return clock[0]
+
+        def fake_execute(run, config, debug):
+            executed.append((clock[0], run))
+            clock[0] += durations["gericht" if run.dates else "volledig"]
+
+        def fake_sleep(seconds):
+            clock[0] += timedelta(seconds=max(seconds, 1))
+            if clock[0] > until:
+                raise _StopLoop
+
+        monkeypatch.setattr(scheduler, "datetime", FakeDatetime)
+        monkeypatch.setattr(scheduler, "execute", fake_execute)
+        monkeypatch.setattr(scheduler.time_mod, "sleep", fake_sleep)
+        monkeypatch.setattr(scheduler, "load_schedule", lambda *a, **kw: {"clubs": [DAILY_CLUB]})
+        monkeypatch.setattr(scheduler, "describe_schedule", lambda schedule: None)
+        with pytest.raises(_StopLoop):
+            scheduler.run_forever({"booking": BOOKING}, {}, None, debug=False)
+        return executed
+
+    def test_nachtrun_wordt_ingehaald_na_gerichte_run_met_retries(self, monkeypatch):
+        # Dag-club geeft donderdag 22-10 vrij op 14-10 00:00. De gerichte run van 00:00:05 duurt
+        # met retries ~6 min; vroeger viel de nachtrun van 00:01 daardoor stil weg.
+        executed = self._simulate(
+            monkeypatch,
+            start=datetime(2026, 10, 13, 23, 50, tzinfo=TZ),
+            until=datetime(2026, 10, 14, 0, 30, tzinfo=TZ),
+            durations={"gericht": timedelta(minutes=6), "volledig": timedelta(minutes=2)},
+        )
+        reasons = [run.reason for _, run in executed]
+        assert reasons[0] == "startrun"
+        assert reasons[1].startswith("vrijgave Dag")
+        assert reasons[2] == "nachtelijke volledige run"
+        started, nightly = executed[2]
+        assert started == datetime(2026, 10, 14, 0, 6, 5, tzinfo=TZ)
+        assert nightly.at == started  # retries/logging tellen vanaf het inhaalmoment
+        assert len(executed) == 3
+
+    def test_runs_tijdens_lange_startrun_worden_samengevoegd_ingehaald(self, monkeypatch):
+        # Startrun om 23:55 duurt 10 min: de gerichte run (00:00:05) én de nachtrun (00:01) vallen
+        # erin en worden samen één ingehaalde volledige run.
+        executed = self._simulate(
+            monkeypatch,
+            start=datetime(2026, 10, 13, 23, 55, tzinfo=TZ),
+            until=datetime(2026, 10, 14, 0, 30, tzinfo=TZ),
+            durations={"gericht": timedelta(minutes=1), "volledig": timedelta(minutes=10)},
+        )
+        assert [run.reason for _, run in executed] == [
+            "startrun", "ingehaalde volledige run (gemist: 00:00, 00:01)",
+        ]
 
 
 class TestLoadSchedule:

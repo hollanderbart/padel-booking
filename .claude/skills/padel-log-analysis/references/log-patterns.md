@@ -20,6 +20,8 @@ Club-schema (<generated_at>): N club(s), M met bekend vrijgavemoment   ← start
 Run gestart: startrun                     ← once per addon start (so: count = restarts)
 Run gestart: nachtelijke volledige run    ← daily 00:01, preceded by fetch_bookings output
 Run gestart: vrijgave <club> (<strategy>, N d); …   ← targeted run at a release moment
+Run van HH:MM wordt ingehaald (N min te laat)        ← ≥ 2.7.1: run fell due while another was busy
+Run gestart: ingehaalde volledige run (gemist: …) | ingehaald (…): …   ← ≥ 2.7.1: missed runs merged
 ```
 
 A targeted run that books nothing is retried at +1 min and +5 min (`RETRY_DELAYS`), which is
@@ -82,12 +84,14 @@ or `Reservering op <date> overgeslagen (status: Geannuleerd|…)` → `N boeking
   and logs it all when the subprocess exits, so every `[meetandplay]` line of one run has the
   same timestamp (when the provider finished). Don't read durations from them; use
   `Provider … gestart` → `meldt …`.
-- **Collisions drop scheduled runs.** The scheduler is single-threaded: while a run and its
-  retries (up to ~+6 min) are executing, other due runs wait, and anything more than
-  `DUE_GRACE` (2 min) late is silently dropped. Seen in practice: a targeted 00:00 release run
-  with retries swallowed the 00:01 nightly run, including that night's `fetch_bookings`. A day
-  without a nightly run in the fact sheet is the symptom; check `scheduler.py` (`DUE_GRACE`,
-  `run_forever`) before calling it a new bug.
+- **Collisions between runs.** The scheduler is single-threaded: while a run and its retries
+  (up to ~+6 min) execute, other due runs wait. **Before v2.7.1** anything more than 2 min late
+  was silently dropped. Seen in practice: a targeted 00:00 release run with retries swallowed
+  the 00:01 nightly run, including that night's `fetch_bookings`. **Since v2.7.1** missed runs
+  are caught up right afterwards (`Run van HH:MM wordt ingehaald (N min te laat)`), and several
+  missed runs become one run with reason `ingehaalde volledige run (gemist: …)` or
+  `ingehaald (…): …`. A day without a nightly run on ≥ 2.7.1 is a new bug; check
+  `run_forever`/`next_due` in `scheduler.py`.
 - **`.booking_state.json` and `booking_history.json` record claims, not bookings.** They are
   written on `meldt succes`. Since v2.6.0 only `future_bookings.json` counts as "booked".
 - **`last_run.json` `success: false`** just means the latest run booked nothing. Normal most of
