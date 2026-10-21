@@ -481,6 +481,16 @@ De coördinaten komen van de zoekpagina van Meet & Play, of van de clubpagina al
 worden bewaard in `/config/padel/.meetandplay_club_coords.json` zodat ook de gerichte runs op het
 vrijgavemoment filteren. Rijafstand kan flink afwijken van hemelsbreed; zet de straal daarop af.
 
+In `schedule_mode: smart` gebruikt de planner hetzelfde bestand: voor clubs buiten de straal worden geen
+gerichte runs meer gepland (bij het starten en bij elke verversing van het club-schema, elke 6 uur):
+
+```
+TERWEGEN INDOOR buiten straal: 18.9 km (straal 14 km) — niet gepland
+```
+
+Een club waarvan de locatie nog niet bekend is, blijft ingepland. De eerste run die hem bezoekt slaat de
+coördinaten op, en vanaf de volgende verversing valt hij af als hij te ver weg ligt.
+
 ### Notificatie zonder betaallink / "Geen betaallink — slot telt niet als geboekt" (Meet & Play)
 
 Na "Betaling starten" moet de addon op de betaalpagina uitkomen (iDEAL of de boekingssite van de club).

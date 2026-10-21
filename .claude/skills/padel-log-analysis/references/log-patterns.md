@@ -60,6 +60,7 @@ or `Reservering op <date> overgeslagen (status: Geannuleerd|…)` → `N boeking
 | `Geen boeking gemaakt door alle providers` | Nothing suitable free | Normal on its own |
 | `Beschikbare starttijden bij <club>: … — binnen venster: geen` | Club has slots, none in the time window | Normal; useful to show "near misses" |
 | `<club> overgeslagen: X km (straal N km)` | Own distance filter (v2.7.0) | Explains why a club is never tried |
+| `<club> buiten straal: X km (straal N km) — niet gepland` | Scheduler drops the club from the schedule (≥ 2.8.0), so no targeted runs | Normal. Before 2.8.0 such clubs still got (useless) targeted runs |
 | `Gerichte run overgeslagen — X al geboekt` | Release run for an already-booked date | Normal |
 | `Provider 'playtomic' tijdelijk uitgeschakeld: … (DNS)` | Hard-coded kill switch (`disabled_reason`) | Since v2.6.2 only logged when Playtomic is enabled; before that, noise |
 | `Meet & Play sessie verlopen — opnieuw inloggen...` → `Automatisch inloggen gelukt!` | Session cookie expired, re-login OK | Normal |

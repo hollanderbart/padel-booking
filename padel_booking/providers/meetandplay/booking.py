@@ -5,12 +5,9 @@ Gebruikt Playwright voor browser automatisering.
 
 import contextlib
 import html
-import json
 import logging
-import math
 import re
 from datetime import datetime
-from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Locator, Page, sync_playwright
@@ -21,6 +18,14 @@ from providers.base import (
     hhmm_to_minutes,
     upcoming_booking_dates,
     without_skip_dates,
+)
+from providers.meetandplay.coords import (
+    club_distance_km,
+    club_slug,
+    coords_file,
+    distance_km,  # noqa: F401 — hergebruikt door tests en eerdere imports
+    load_club_coords,
+    save_club_coords,
 )
 from providers.meetandplay.session import SessionManager, accept_cookie_banner, save_debug_page
 
@@ -47,7 +52,6 @@ DISTANCE_OPTIONS_KM = (5, 10, 20, 50, 100, 150, 200, 400)
 CLUB_COORDS_RE = re.compile(
     r'"slug":"([^"]+)","name":"(?:[^"\\]|\\.)*","latitude":"(-?[\d.]+)","longitude":"(-?[\d.]+)"'
 )
-CLUB_SLUG_RE = re.compile(r"/club/([^/?#]+)")
 # Clubpagina: kaart-initialisatie met de clublocatie, voor clubs die niet op de zoekpagina staan
 CLUB_PAGE_COORDS_RE = re.compile(r"\{latitude: (-?[\d.]+), longitude: (-?[\d.]+)\}")
 LIVEWIRE_DATE_RE = re.compile(r"window\.Livewire\.find\('([^']+)'\)\.set\('date'")
@@ -77,13 +81,6 @@ def parse_club_coordinates(page_html: str) -> dict[str, list[float]]:
         slug: [float(lat), float(lon)]
         for slug, lat, lon in CLUB_COORDS_RE.findall(html.unescape(page_html))
     }
-
-
-def distance_km(a: list[float], b: list[float]) -> float:
-    """Hemelsbrede afstand (haversine) tussen twee [lat, lon]-punten."""
-    lat1, lon1, lat2, lon2 = map(math.radians, (*a, *b))
-    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
-    return 2 * 6371 * math.asin(math.sqrt(h))
 
 
 def _first_present(page: Page, selectors: list[str], visible: bool = False) -> Locator | None:
@@ -117,21 +114,17 @@ class MeetAndPlayBooker:
         cookies_file = self._provider_config.get("cookies_file", ".meetandplay_cookies.json")
         self.session_manager = SessionManager(cookies_file)
         # Clubcoördinaten uit de zoekpagina, bewaard voor gerichte runs (die slaan de zoekpagina over)
-        self._coords_file = Path(cookies_file).with_name(".meetandplay_club_coords.json")
+        self._coords_file = coords_file(cookies_file)
 
     # ------------------------------------------------------------------
     # Afstand tot de clubs
     # ------------------------------------------------------------------
 
     def _load_club_coords(self) -> dict[str, list[float]]:
-        try:
-            return json.loads(self._coords_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+        return load_club_coords(self._coords_file)
 
     def _save_club_coords(self, coords: dict[str, list[float]]) -> None:
-        with contextlib.suppress(OSError):
-            self._coords_file.write_text(json.dumps(coords), encoding="utf-8")
+        save_club_coords(self._coords_file, coords)
 
     @staticmethod
     def _club_page_coords(page: Page, url: str) -> list[float] | None:
@@ -154,25 +147,24 @@ class MeetAndPlayBooker:
         location = self._booking["location"]
         if location.get("latitude") is None or location.get("longitude") is None:
             return clubs
-        origin = [float(location["latitude"]), float(location["longitude"])]
         radius = float(location["radius_km"])
         coords = self._load_club_coords() if coords is None else dict(coords)
 
         kept = []
         added = False
         for club in clubs:
-            match = CLUB_SLUG_RE.search(club.get("url", ""))
-            position = coords.get(match.group(1)) if match else None
-            if position is None and match and page is not None:
+            slug = club_slug(club.get("url", ""))
+            position = coords.get(slug) if slug else None
+            if position is None and slug and page is not None:
                 position = self._club_page_coords(page, club["url"])
                 if position:
-                    coords[match.group(1)] = position
+                    coords[slug] = position
                     added = True
-            if position is None:
+            km = club_distance_km(location, position)
+            if km is None:
                 logger.info("%s: locatie onbekend — niet op afstand gefilterd", club["name"])
                 kept.append(club)
                 continue
-            km = distance_km(origin, position)
             if km > radius:
                 logger.info("%s overgeslagen: %.1f km (straal %g km)", club["name"], km, radius)
             else:

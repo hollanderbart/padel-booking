@@ -1,3 +1,7 @@
+## 2.8.0
+
+- Planner (`schedule_mode: smart`): clubs buiten `location_radius_km` krijgen geen gerichte runs meer. De booker sloeg ze al over, dus zulke runs deden niets en konden de nachtrun ophouden (bijv. een run om 00:00 voor alleen My Padel Club Krimpen). De planner gebruikt dezelfde clubcoördinaten als de booker (`/config/padel/.meetandplay_club_coords.json`); clubs met een onbekende locatie blijven ingepland. In de log: `<club> buiten straal: X km (straal N km) — niet gepland`
+
 ## 2.7.3
 
 - Security: `python-dotenv` bijgewerkt naar 1.2.2 (Dependabot-melding over `set_key` en symlinks). De addon gebruikt alleen `load_dotenv`, dus was niet kwetsbaar; dit houdt de dependency actueel

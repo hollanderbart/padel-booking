@@ -14,11 +14,13 @@ from scheduler import (
     ROLLING,
     TZ,
     PlannedRun,
+    load_nearby_schedule,
     load_schedule,
     next_due,
     next_nightly,
     plan_runs,
     release_moments,
+    within_radius,
 )
 
 BOOKING = {"day": "thursday", "time_start": "19:30", "time_end": "21:00", "weeks_ahead": 4}
@@ -187,6 +189,41 @@ class TestRunForever:
         assert [run.reason for _, run in executed] == [
             "startrun", "ingehaalde volledige run (gemist: 00:00, 00:01)",
         ]
+
+
+class TestWithinRadius:
+    # Clubcoördinaten (openbare clublocaties) zoals de provider ze cachet: {slug: [lat, lon]}
+    COORDS = {"88191": [52.16026, 4.777723], "88018": [52.2166339, 4.5069429]}
+    HAL = {**ROLLING_CLUB, "club_name": "Hal 0172", "club_url": "https://meetandplay.nl/club/88191"}
+    TERWEGEN = {**DAILY_CLUB, "club_name": "TERWEGEN INDOOR", "club_url": "https://meetandplay.nl/club/88018"}
+    ONBEKEND = {**DAILY_CLUB, "club_name": "Onbekend", "club_url": "https://meetandplay.nl/club/123"}
+    LOCATION = {"city": "Boskoop", "radius_km": 14, "latitude": 52.07, "longitude": 4.66}
+
+    def test_club_buiten_straal_valt_weg_onbekende_blijft(self):
+        schedule = {"generated_at": "x", "clubs": [self.HAL, self.TERWEGEN, self.ONBEKEND]}
+        result = within_radius(schedule, self.LOCATION, self.COORDS)
+        assert [c["club_name"] for c in result["clubs"]] == ["Hal 0172", "Onbekend"]
+        assert result["generated_at"] == "x"
+
+    def test_zonder_coordinaten_of_straal_geen_filter(self):
+        schedule = {"clubs": [self.HAL, self.TERWEGEN]}
+        assert within_radius(schedule, {"radius_km": 14}, self.COORDS) == schedule
+        assert within_radius(schedule, {"latitude": 52.07, "longitude": 4.66}, self.COORDS) == schedule
+
+    def test_gefilterde_club_krijgt_geen_gerichte_runs(self):
+        schedule = within_radius({"clubs": [self.TERWEGEN]}, self.LOCATION, self.COORDS)
+        assert [r for r in plan_runs(schedule, BOOKING, NOW, NOW + timedelta(days=14)) if r.dates] == []
+
+    def test_load_nearby_schedule_leest_coordinaten_naast_cookiebestand(self, tmp_path):
+        (tmp_path / ".meetandplay_club_coords.json").write_text(json.dumps(self.COORDS))
+        local = tmp_path / "schedule.json"
+        local.write_text(json.dumps({"clubs": [self.HAL, self.TERWEGEN]}))
+        config = {
+            "location": self.LOCATION,
+            "providers": {"meetandplay": {"cookies_file": str(tmp_path / ".meetandplay_cookies.json")}},
+        }
+        schedule = load_nearby_schedule(config, "http://127.0.0.1:9/ongebruikt", tmp_path / "cache.json", local)
+        assert [c["club_name"] for c in schedule["clubs"]] == ["Hal 0172"]
 
 
 class TestLoadSchedule:

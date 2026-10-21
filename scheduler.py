@@ -30,6 +30,7 @@ import requests
 
 from orchestrator import load_config, setup_logging
 from providers.base import booking_days, hhmm_to_minutes, upcoming_booking_dates
+from providers.meetandplay.coords import club_distance_km, club_slug, coords_file, load_club_coords
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,32 @@ def load_schedule(url: str, cache_file: Path, local_file: Path | None = None) ->
         return {"clubs": []}
 
 
+def within_radius(schedule: dict, location: dict, coords: dict[str, list[float]]) -> dict:
+    """
+    Schema zonder clubs die hemelsbreed verder liggen dan `location.radius_km` — de provider slaat
+    die toch over, dus een gerichte run voor alleen zulke clubs doet niets (en kan de nachtrun
+    ophouden). Clubs zonder bekende locatie blijven staan, net als in de provider.
+    """
+    if location.get("radius_km") is None:
+        return schedule
+    radius = float(location["radius_km"])
+    kept = []
+    for club in schedule.get("clubs", []):
+        km = club_distance_km(location, coords.get(club_slug(club.get("club_url", "")) or ""))
+        if km is not None and km > radius:
+            logger.info("%s buiten straal: %.1f km (straal %g km) — niet gepland", club["club_name"], km, radius)
+            continue
+        kept.append(club)
+    return {**schedule, "clubs": kept}
+
+
+def load_nearby_schedule(config: dict, url: str, cache_file: Path, local_file: Path | None = None) -> dict:
+    """Club-schema laden en clubs buiten de straal weglaten (coördinaten uit de cache van de provider)."""
+    schedule = load_schedule(url, cache_file, local_file)
+    cookies_file = config.get("providers", {}).get("meetandplay", {}).get("cookies_file", ".meetandplay_cookies.json")
+    return within_radius(schedule, config.get("location", {}), load_club_coords(coords_file(cookies_file)))
+
+
 def describe_schedule(schedule: dict) -> None:
     clubs = schedule.get("clubs", [])
     timed = [c for c in clubs if c.get("strategy") in (ROLLING, DAILY)]
@@ -248,7 +275,7 @@ def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug
     cache_file = Path(schedule_cfg.get("cache_file", DEFAULT_CACHE_FILE))
     booking_cfg = config["booking"]
 
-    schedule = load_schedule(url, cache_file, local_file)
+    schedule = load_nearby_schedule(config, url, cache_file, local_file)
     describe_schedule(schedule)
     loaded_at = datetime.now(TZ)
     # Alle geplande runs tot en met `checked_until` zijn uitgevoerd (of gedekt door de startrun).
@@ -263,7 +290,7 @@ def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug
     while True:
         now = datetime.now(TZ)
         if now - loaded_at >= SCHEDULE_REFRESH:
-            schedule = load_schedule(url, cache_file, local_file)
+            schedule = load_nearby_schedule(config, url, cache_file, local_file)
             describe_schedule(schedule)
             loaded_at = now
 
@@ -309,8 +336,8 @@ def main() -> None:
     config = load_config(args.config)
     schedule_cfg = config.get("schedule", {})
     if args.plan:
-        schedule = load_schedule(schedule_cfg.get("url", DEFAULT_SCHEDULE_URL),
-                                 Path(schedule_cfg.get("cache_file", DEFAULT_CACHE_FILE)), args.schedule_file)
+        schedule = load_nearby_schedule(config, schedule_cfg.get("url", DEFAULT_SCHEDULE_URL),
+                                        Path(schedule_cfg.get("cache_file", DEFAULT_CACHE_FILE)), args.schedule_file)
         describe_schedule(schedule)
         print_plan(config, schedule)
         return
