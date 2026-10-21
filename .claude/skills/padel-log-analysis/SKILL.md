@@ -20,9 +20,12 @@ cross-checking sources against each other, not just grepping for ERROR.
   `.playtomic_token.json` yourself. Payment URLs and the account email are fine to mention
   if relevant but don't need to be.
 - Host facts: no python3 (use `jq`), `ha apps …` not `ha addons …`, slug
-  `a30a93bf_padel_booking`. In zsh `$SSH` is not word-split, so use an array:
-  `SSH=(ssh -i ~/.ssh/id_ed25519_ha -o IdentitiesOnly=yes -o BatchMode=yes root@homeassistant.local)`
-  and `"${SSH[@]}" "<cmd>"`.
+  `a30a93bf_padel_booking`. The host address comes from `PADEL_HA_HOST` (set in the local,
+  git-ignored `.claude/settings.local.json`); the repo is public, so never write the real
+  address into tracked files. In zsh `$SSH` is not word-split, so use an array:
+  `SSH=(ssh -i ~/.ssh/id_ed25519_ha -o IdentitiesOnly=yes -o BatchMode=yes "$PADEL_HA_HOST")`
+  and `"${SSH[@]}" "<cmd>"`. If `PADEL_HA_HOST` is unset, `collect.sh` falls back to
+  `root@homeassistant.local`; when that fails, ask the user for the address.
 
 ## Workflow
 
