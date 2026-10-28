@@ -1,17 +1,17 @@
 # Release-strategieën padelbanen (Meet & Play)
 
-_Automatisch gegenereerd op 2026-10-28 01:01 (Europe/Amsterdam) door `.github/workflows/booking-research.yml` op basis van de observaties van de laatste 30 dagen. Gemeten als niet-ingelogde bezoeker._
+_Automatisch gegenereerd op 2026-10-28 12:29 (Europe/Amsterdam) door `.github/workflows/booking-research.yml` op basis van de observaties van de laatste 30 dagen. Gemeten als niet-ingelogde bezoeker._
 
 | Club | Adres | Venster | Strategie | Vrijgave | Advies | Obs. |
 |---|---|---|---|---|---|---|
-| [A.T.V. Berkenrode](https://meetandplay.nl/club/70359) | Het Hoge Land 1, 2652 EA BERKEL EN RODENRIJS | 7 d | rollend | 7 × 24 uur vóór het slot | Start de booker precies 7 dagen vóór het gewenste slot, op de starttijd van het slot. | 46 |
-| [Hal 0172](https://meetandplay.nl/club/88191) | Nieuwveenseweg 39A, 2421 LB Nieuwkoop | 14 d | rollend | 14 × 24 uur vóór het slot | Start de booker precies 14 dagen vóór het gewenste slot, op de starttijd van het slot. | 37 |
-| [Tennis & Padel de Munnik](https://meetandplay.nl/club/31559) | Hoogmadeseweg 41c, 2351 CN Leiderdorp | 1 d | rollend | 1 × 24 uur vóór het slot | Start de booker precies 1 dagen vóór het gewenste slot, op de starttijd van het slot. | 46 |
-| [Tennis en Padel Meerzicht](https://meetandplay.nl/club/28541) | Zalkerbos 320, 2716 KS Zoetermeer | 30 d | rollend | 30 × 24 uur vóór het slot | Start de booker precies 30 dagen vóór het gewenste slot, op de starttijd van het slot. | 25 |
-| [Lake Seven](https://meetandplay.nl/club/77405) | Strandweg 23 , 2761 DM Zevenhuizen | 8 d | dagelijks | dagelijks tussen 02:00 en 10:00, 8 dagen vooruit | Start de booker dagelijks tussen 02:00 en 10:00 en zoek 8 dagen vooruit. | 46 |
-| [My Padel Club Krimpen](https://meetandplay.nl/club/88115) | Krimpenerbosweg 4 , 2923 LA Krimpen aan den IJssel | 13 d | dagelijks | dagelijks om 00:00, 13 dagen vooruit | Start de booker dagelijks om 00:00 en zoek 13 dagen vooruit. | 46 |
-| [Sportcentrum midden Boskoop](https://meetandplay.nl/club/88093) | Sportlaan 1 , 2771RW Boskoop | 8 d | dagelijks | dagelijks tussen 03:00 en 10:00, 8 dagen vooruit | Start de booker dagelijks tussen 03:00 en 10:00 en zoek 8 dagen vooruit. | 44 |
-| [TERWEGEN INDOOR](https://meetandplay.nl/club/88018) | Jagtlustkade 12 , 2171 AG Sassenheim | 29 d | dagelijks | dagelijks tussen 03:00 en 10:00, 29 dagen vooruit | Start de booker dagelijks tussen 03:00 en 10:00 en zoek 29 dagen vooruit. | 46 |
+| [A.T.V. Berkenrode](https://meetandplay.nl/club/70359) | Het Hoge Land 1, 2652 EA BERKEL EN RODENRIJS | 7 d | rollend | 7 × 24 uur vóór het slot | Start de booker precies 7 dagen vóór het gewenste slot, op de starttijd van het slot. | 47 |
+| [Hal 0172](https://meetandplay.nl/club/88191) | Nieuwveenseweg 39A, 2421 LB Nieuwkoop | 14 d | rollend | 14 × 24 uur vóór het slot | Start de booker precies 14 dagen vóór het gewenste slot, op de starttijd van het slot. | 38 |
+| [Tennis & Padel de Munnik](https://meetandplay.nl/club/31559) | Hoogmadeseweg 41c, 2351 CN Leiderdorp | 1 d | rollend | 1 × 24 uur vóór het slot | Start de booker precies 1 dagen vóór het gewenste slot, op de starttijd van het slot. | 47 |
+| [Tennis en Padel Meerzicht](https://meetandplay.nl/club/28541) | Zalkerbos 320, 2716 KS Zoetermeer | 30 d | rollend | 30 × 24 uur vóór het slot | Start de booker precies 30 dagen vóór het gewenste slot, op de starttijd van het slot. | 26 |
+| [Lake Seven](https://meetandplay.nl/club/77405) | Strandweg 23 , 2761 DM Zevenhuizen | 8 d | dagelijks | dagelijks tussen 02:00 en 10:00, 8 dagen vooruit | Start de booker dagelijks tussen 02:00 en 10:00 en zoek 8 dagen vooruit. | 47 |
+| [My Padel Club Krimpen](https://meetandplay.nl/club/88115) | Krimpenerbosweg 4 , 2923 LA Krimpen aan den IJssel | 13 d | dagelijks | dagelijks om 00:00, 13 dagen vooruit | Start de booker dagelijks om 00:00 en zoek 13 dagen vooruit. | 47 |
+| [Sportcentrum midden Boskoop](https://meetandplay.nl/club/88093) | Sportlaan 1 , 2771RW Boskoop | 8 d | dagelijks | dagelijks tussen 03:00 en 10:00, 8 dagen vooruit | Start de booker dagelijks tussen 03:00 en 10:00 en zoek 8 dagen vooruit. | 45 |
+| [TERWEGEN INDOOR](https://meetandplay.nl/club/88018) | Jagtlustkade 12 , 2171 AG Sassenheim | 29 d | dagelijks | dagelijks tussen 03:00 en 10:00, 29 dagen vooruit | Start de booker dagelijks tussen 03:00 en 10:00 en zoek 29 dagen vooruit. | 47 |
 | [ALTV Zoetermeer - Tennis & Padel](https://meetandplay.nl/club/28803) | Dr. J.W. Paltelaan 111, 2712 PT ZOETERMEER | – | geen | – | Geen boekbare padel-slots voor niet-leden gezien. | 4 |
 | [ATC TEAN](https://meetandplay.nl/club/30700) | Prins Bernhardlaan 37, 2404 NE Alphen aan den Rijn | – | geen | – | Geen boekbare padel-slots voor niet-leden gezien. | 5 |
 | [Benthuizer Tennisclub](https://meetandplay.nl/club/30759) | de Dam 7, 2731 CE BENTHUIZEN | – | geen | – | Geen boekbare padel-slots voor niet-leden gezien. | 5 |
