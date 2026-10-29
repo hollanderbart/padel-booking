@@ -464,6 +464,9 @@ Bij de upgrade van v1 (knltb_padel_booking) naar v2 (padel_booking) moet je:
 
 1. Controleer `knltb_email` en `knltb_password` in de Configuration tab
 2. Bekijk de debug screenshot via **File Editor**: `/config/padel/debug_login_failed.png`
+3. Een fout wachtwoord laat de browser op `id.knltb.nl/login` staan met "Combinatie van gebruikersnaam en
+   wachtwoord niet gevonden". Vóór v2.10.1 zag de addon dat soms aan voor een geldige sessie ("Sessie lijkt geldig"),
+   omdat `meetandplay.nl` in de terugkeer-URL staat; nu staat er `Automatisch inloggen mislukt`
 
 ### Meet & Play niet bereikbaar
 

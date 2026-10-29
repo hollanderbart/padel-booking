@@ -189,6 +189,17 @@ class TestIsLoggedIn:
         assert "meetandplay.nl" in call_url
 
 
+    def test_knltb_loginpagina_met_returnurl_is_niet_ingelogd(self, tmp_path):
+        # Na een fout wachtwoord blijft de browser op id.knltb.nl/login?ReturnUrl=…meetandplay.nl…;
+        # vroeger telde dat als "Sessie lijkt geldig"
+        m = _make_manager(tmp_path)
+        page = _make_page(url="https://id.knltb.nl/login?ReturnUrl=https%3A%2F%2Fmeetandplay.nl%2Fknltb-id%2Fcallback")
+        page.locator.side_effect = lambda selector: MagicMock(count=MagicMock(return_value=0))
+
+        assert m.is_logged_in(page) is False
+        assert page.goto.call_args[0][0].startswith("https://www.meetandplay.nl")
+
+
 # ---------------------------------------------------------------------------
 # auto_login
 # ---------------------------------------------------------------------------

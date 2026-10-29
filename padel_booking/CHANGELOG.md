@@ -1,3 +1,7 @@
+## 2.10.1
+
+- Fix (Meet & Play): na een fout wachtwoord bleef de browser op de KNLTB-loginpagina (`id.knltb.nl/login?ReturnUrl=…meetandplay.nl…`), en de sessiecheck zag dat aan voor ingelogd ("Sessie lijkt geldig"), omdat alleen gekeken werd of `meetandplay.nl` ergens in de URL stond. Nu telt alleen een pagina op meetandplay.nl zelf, en meldt de addon `Automatisch inloggen mislukt`
+
 ## 2.10.0
 
 - Betaalmelding valt meer op: de titel noemt de deadline en het slot (`Betaal vóór 20:15: Hal 0172, do 12-11 20:00`), en de melding is *time-sensitive*, zodat hij op iOS door Focus/Slaap heen komt en op het toegangsscherm blijft (zet Tijdgevoelige meldingen aan voor de Home Assistant-app). De deadline is 15 minuten na versturen: Meet & Play betaalt via iDEAL (Mollie), een iDEAL-betaling verloopt na 15 minuten, en daarna annuleert Meet & Play de reservering. Die termijn kan niet verlengd worden

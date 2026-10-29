@@ -8,6 +8,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Page
 
@@ -30,6 +31,12 @@ NETWORK_ERROR_RE = re.compile(r"net::ERR_[A-Z_]+")
 class SiteUnreachableError(RuntimeError):
     """meetandplay.nl of de KNLTB-login is niet bereikbaar (storing/netwerk) — geen inlogprobleem."""
 SSO_PASSWORD_SELECTOR = 'input[type="password"], input[name="Password"], input[name="password"]'
+
+
+def on_meetandplay(url: str) -> bool:
+    """Staat de pagina op meetandplay.nl zelf? De KNLTB-loginpagina heeft meetandplay.nl alleen in de ReturnUrl."""
+    host = urlparse(url).netloc.lower()
+    return host == "meetandplay.nl" or host.endswith(".meetandplay.nl")
 
 
 def accept_cookie_banner(page: Page) -> None:
@@ -110,13 +117,13 @@ class SessionManager:
 
     def is_logged_in(self, page: Page) -> bool:
         try:
-            if "meetandplay.nl" not in page.url:
+            if not on_meetandplay(page.url):
                 page.goto(BASE_URL, wait_until="load", timeout=15000)
             else:
                 page.wait_for_load_state("load", timeout=15000)
             page.wait_for_timeout(1500)
 
-            if "meetandplay.nl" not in page.url:
+            if not on_meetandplay(page.url):
                 logger.info("Niet op meetandplay.nl na sessiecheck (%s) — als niet ingelogd beschouwen", page.url)
                 return False
 
