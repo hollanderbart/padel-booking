@@ -37,10 +37,11 @@ class Notifier:
     def __init__(self):
         self.platform = platform.system()
 
-    def send(self, title: str, message: str, sound: bool = True, url: str = "", time_sensitive: bool = False) -> None:
+    def send(self, title: str, message: str, sound: bool = True, url: str = "", time_sensitive: bool = False,
+             actions: list[dict] | None = None) -> None:
         # Probeer altijd eerst HA mobile push als SUPERVISOR_TOKEN aanwezig is
         if os.environ.get("SUPERVISOR_TOKEN"):
-            self._send_ha_push(title, message, url, time_sensitive)
+            self._send_ha_push(title, message, url, time_sensitive, actions)
             return
 
         if self.platform == "Darwin":
@@ -48,7 +49,8 @@ class Notifier:
         else:
             self._send_console(title, message)
 
-    def _send_ha_push(self, title: str, message: str, url: str = "", time_sensitive: bool = False) -> None:
+    def _send_ha_push(self, title: str, message: str, url: str = "", time_sensitive: bool = False,
+                      actions: list[dict] | None = None) -> None:
         if not _HAS_REQUESTS:
             logger.warning("requests niet beschikbaar — kan geen HA push sturen")
             self._send_console(title, message)
@@ -74,6 +76,9 @@ class Notifier:
         if time_sensitive:
             # iOS: komt door Focus/Slaap heen en blijft op het toegangsscherm staan
             data["push"] = {"interruption-level": "time-sensitive"}
+        if actions:
+            # Knoppen onder de melding (lang indrukken / uitklappen), bijv. een tweede link
+            data["actions"] = actions
         if data:
             payload["data"] = data
 
@@ -134,6 +139,7 @@ def notify_booking_available(
     booked_date: str = "",
     provider: str = "",
     deadline: datetime | None = None,
+    order_url: str = "",
 ) -> None:
     club_name = location.split(" — ", maxsplit=1)[0]
     label = slot_label(club_name, booked_date, time)
@@ -141,18 +147,30 @@ def notify_booking_available(
     message = f"{provider_line}{court_name} — {time}\n{location}"
     if deadline:
         title = f"Betaal vóór {deadline:%H:%M}: {label}"
-        message += "\n\nTik om te betalen. Niet betaald binnen 15 minuten = reservering vervalt."
+        message += f"\n\nTik om te betalen. Niet betaald vóór {deadline:%H:%M} = reservering vervalt."
     else:
         title = f"Padelbaan beschikbaar: {label}"
         if payment_url:
             message += f"\n\nTik om te boeken bij {club_name}."
-    Notifier().send(title=title, message=message, sound=True, url=payment_url, time_sensitive=bool(payment_url))
+    if order_url:
+        message += "\nWerkt de link niet? Kies 'Open in Meet & Play' (ingelogd) → Betaling starten."
+    url = payment_url or order_url
+    Notifier().send(title=title, message=message, sound=True, url=url, time_sensitive=bool(url),
+                    actions=_order_actions(order_url))
+
+
+def _order_actions(order_url: str) -> list[dict] | None:
+    """Knop naar de reservering in je Meet & Play-account: daar kun je ook betalen (als je ingelogd bent)."""
+    return [{"action": "URI", "title": "Open in Meet & Play", "uri": order_url}] if order_url else None
 
 
 def notify_payment_reminder(club_name: str, booked_date: str, time_range: str, payment_url: str,
-                            deadline: datetime | None = None) -> None:
+                            deadline: datetime | None = None, order_url: str = "") -> None:
     """Herinnering: de reservering is na een tijdje nog niet betaald."""
     label = slot_label(club_name, booked_date, time_range)
     title = f"Nog niet betaald — vóór {deadline:%H:%M}: {label}" if deadline else f"Nog niet betaald: {label}"
     message = "Je reservering vervalt als je niet op tijd betaalt.\n\nTik om te betalen."
-    Notifier().send(title=title, message=message, sound=True, url=payment_url, time_sensitive=True)
+    if order_url:
+        message += "\nOf kies 'Open in Meet & Play' → Betaling starten."
+    Notifier().send(title=title, message=message, sound=True, url=payment_url or order_url, time_sensitive=True,
+                    actions=_order_actions(order_url))

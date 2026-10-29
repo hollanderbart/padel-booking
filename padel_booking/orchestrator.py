@@ -33,7 +33,10 @@ from providers.base import booking_days, upcoming_booking_dates
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = "config.yaml"
-# Herinnering voor een onbetaalde reservering: ruim binnen de 15 minuten van een iDEAL-betaling
+# Herinnering voor een onbetaalde reservering: zoveel vóór het einde van de vasthoudtijd, maar niet
+# eerder dan REMINDER_MIN na de eerste melding; zonder bekende deadline REMINDER_AFTER na de melding
+REMINDER_BEFORE = timedelta(minutes=7)
+REMINDER_MIN = timedelta(minutes=1)
 REMINDER_AFTER = timedelta(minutes=8)
 PAID_STATUSES = ("betaald", "confirmed")
 # Providers loggen zelf al een timestamp + level; strip die om dubbele prefixes te voorkomen
@@ -169,22 +172,36 @@ def _read_json_list(path: Path) -> list:
     return data if isinstance(data, list) else []
 
 
+def payment_deadline_for(slot_info: dict, sent_at: datetime) -> datetime | None:
+    """
+    Tot wanneer de reservering vastgehouden wordt: de tijd van de orderpagina ("tot 13:09"),
+    anders de iDEAL-termijn van de betaallink.
+    """
+    if hold := slot_info.get("hold_until"):
+        hours, minutes = map(int, hold.split(":"))
+        deadline = sent_at.replace(hour=hours, minute=minutes, second=0, microsecond=0)
+        return deadline if deadline >= sent_at - timedelta(minutes=1) else deadline + timedelta(days=1)
+    return payment_deadline(slot_info.get("payment_url", ""), sent_at)
+
+
 def add_pending_payment(pending_file: Path, booked_date: str, slot_info: dict, provider: str,
                         sent_at: datetime, deadline: datetime | None) -> None:
     """Onthoud een verstuurde betaallink, zodat er een herinnering volgt als hij niet betaald wordt."""
+    remind_at = max(sent_at + REMINDER_MIN, deadline - REMINDER_BEFORE) if deadline else sent_at + REMINDER_AFTER
     entry = {
         "booked_date": booked_date,
         "provider": provider,
         "club_name": slot_info.get("club_name", ""),
         "time_range": slot_info.get("time_range", ""),
         "payment_url": slot_info.get("payment_url", ""),
+        "order_url": slot_info.get("order_url", ""),
         "sent_at": sent_at.isoformat(timespec="seconds"),
-        "remind_at": (sent_at + REMINDER_AFTER).isoformat(timespec="seconds"),
+        "remind_at": remind_at.isoformat(timespec="seconds"),
         "deadline": deadline.isoformat(timespec="seconds") if deadline else None,
     }
     if _write_json(pending_file, [*_read_json_list(pending_file), entry], "openstaande betalingen"):
         logger.info("Herinnering gepland om %s als %s op %s niet betaald is",
-                    (sent_at + REMINDER_AFTER).strftime("%H:%M"), entry["club_name"], booked_date)
+                    remind_at.strftime("%H:%M"), entry["club_name"], booked_date)
 
 
 def next_reminder_at(pending_file: Path) -> datetime | None:
@@ -224,7 +241,7 @@ def remind_unpaid(config: dict, refresh_bookings: Callable[[], None], now: datet
         else:
             logger.info("Reservering %s op %s nog niet betaald — herinnering sturen", entry["club_name"], entry["booked_date"])
             notify_payment_reminder(entry["club_name"], entry["booked_date"], entry["time_range"],
-                                    entry["payment_url"], deadline)
+                                    entry["payment_url"], deadline, entry.get("order_url", ""))
     _write_json(pending_file, [p for p in pending if p not in due], "openstaande betalingen")
 
 
@@ -447,7 +464,7 @@ def _handle_success(result: dict, dry_run: bool, state_file: Path, history_file:
     slot_info = result["slot_info"]
     payment_url = slot_info.get("payment_url", "")
     sent_at = datetime.now().astimezone()
-    deadline = payment_deadline(payment_url, sent_at)
+    deadline = payment_deadline_for(slot_info, sent_at)
 
     if not dry_run:
         save_booking_state(state_file, booked_date, slot_info, provider)
@@ -463,6 +480,7 @@ def _handle_success(result: dict, dry_run: bool, state_file: Path, history_file:
         booked_date,
         provider,
         deadline,
+        slot_info.get("order_url", ""),
     )
     _print_summary(provider, slot_info)
 

@@ -111,13 +111,18 @@ or `Reservering op <date> overgeslagen (status: Geannuleerd|…)` → `N boeking
   `run_forever`/`next_due` in `scheduler.py`.
 - **`.booking_state.json` and `booking_history.json` record claims, not bookings.** They are
   written on `meldt succes`. Since v2.6.0 only `future_bookings.json` counts as "booked".
-- **Unpaid reservations are invisible while pending.** A reservation awaiting payment doesn't show
-  under "Aankomend". It shows up only as `Betaald`, or as `Geannuleerd` once the iDEAL payment expired
-  (15 min). "Not in the account" right after a claim therefore says nothing about whether it'll be paid.
-- **Payment link type.** `Betaalprovider-URL` on `mollie.com` or `pay.ideal.nl` is payable from the phone.
-  A link to `meetandplay.nl/club/…/reserveren` or a club's own cart (e.g. `boeken.terwegen.nl/nl/cart/`)
-  most likely only works in the bot's browser session (cart cookie), so the user probably can't pay
-  from that push. Not verified yet: if a claim with such a link lapses, check this first.
+- **Unpaid reservations are held 15 minutes** (verified 2026-10-29). While pending they show under
+  "Aankomend" as `In afwachting van betaling`, with an order page (`/mijn-aankopen/order/<club>/<uuid>`):
+  "De reservering wordt tot HH:MM vastgehouden" plus **Betaling starten**, from any logged-in device.
+  Pressing it again opens a new Mollie page for the same order, but the hold time doesn't move.
+  Then `Betaald` or `Geannuleerd`. `fetch_bookings` keeps pending ones in `future_bookings.json` (status
+  `in afwachting van betaling`), so that date counts as booked until it lapses. Use
+  `meetandplay.nl/mijn-aankopen`: the `www.` variant redirects to the homepage.
+- **Payment link type.** `Betaalprovider-URL` on `mollie.com` (verified: opens without any session)
+  or `pay.ideal.nl` is payable from the phone. Since ≥ 2.11.0 the push also carries the order page
+  (`Reservering in je account: …, vastgehouden tot HH:MM`) as an "Open in Meet & Play" button. A
+  `meetandplay.nl/club/…/reserveren` link or a club's own cart (e.g. `boeken.terwegen.nl/nl/cart/`)
+  most likely only works in the bot's session; there the order page is the way to pay.
 - **`last_run.json` `success: false`** just means the latest run booked nothing. Normal most of
   the time.
 - **Duplicate claims for the same date** (e.g. two successes for one date hours apart) mean

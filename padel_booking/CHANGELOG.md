@@ -1,3 +1,9 @@
+## 2.11.0
+
+- Betalen kan nu op twee manieren vanuit de melding. Tikken opent zoals voorheen de Mollie-betaalpagina, die op elk apparaat werkt zonder in te loggen. Nieuw is de knop **Open in Meet & Play**: die opent de reservering in je account (`/mijn-aankopen/order/…`, "In afwachting van betaling" + **Betaling starten**), op elk apparaat waarop je bij Meet & Play bent ingelogd. Dat is de terugvaloptie als de betaallink niet werkt, bijv. bij een club met een eigen boekingssite. Getest met een echte (onbetaalde) reservering
+- De deadline in de titel komt nu van de orderpagina ("De reservering wordt tot 13:09 vastgehouden") in plaats van een aanname van 15 minuten; de herinnering volgt 7 minuten vóór die deadline. Lukt het ophalen niet, dan blijft het 15 minuten na de melding
+- Docs: een onbetaalde reservering staat wél onder "Aankomend" (als "In afwachting van betaling"); de eerdere beschrijving klopte niet
+
 ## 2.10.1
 
 - Fix (Meet & Play): na een fout wachtwoord bleef de browser op de KNLTB-loginpagina (`id.knltb.nl/login?ReturnUrl=…meetandplay.nl…`), en de sessiecheck zag dat aan voor ingelogd ("Sessie lijkt geldig"), omdat alleen gekeken werd of `meetandplay.nl` ergens in de URL stond. Nu telt alleen een pagina op meetandplay.nl zelf, en meldt de addon `Automatisch inloggen mislukt`

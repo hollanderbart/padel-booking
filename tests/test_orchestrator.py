@@ -473,9 +473,31 @@ class TestBetaalherinnering:
         orchestrator.remind_unpaid(self._config(tmp_path), refresh, now=now)
         return sent, refreshed
 
-    def test_herinnering_8_minuten_na_versturen(self, tmp_path):
-        self._add(tmp_path)
+    def test_herinnering_7_minuten_voor_deadline(self, tmp_path):
+        self._add(tmp_path)  # deadline = SENT + 15 min
         assert orchestrator.next_reminder_at(tmp_path / "pending.json") == self.SENT + timedelta(minutes=8)
+
+    def test_herinnering_zonder_deadline_8_minuten_na_versturen(self, tmp_path):
+        orchestrator.add_pending_payment(tmp_path / "pending.json", "2026-11-12", self.SLOT, "meetandplay",
+                                         self.SENT, None)
+        assert orchestrator.next_reminder_at(tmp_path / "pending.json") == self.SENT + timedelta(minutes=8)
+
+    def test_korte_vasthoudtijd_herinnering_minstens_1_minuut_later(self, tmp_path):
+        orchestrator.add_pending_payment(tmp_path / "pending.json", "2026-11-12", self.SLOT, "meetandplay",
+                                         self.SENT, self.SENT + timedelta(minutes=5))
+        assert orchestrator.next_reminder_at(tmp_path / "pending.json") == self.SENT + timedelta(minutes=1)
+
+    def test_deadline_uit_orderpagina_gaat_voor(self):
+        slot = {**self.SLOT, "hold_until": "20:13"}
+        assert orchestrator.payment_deadline_for(slot, self.SENT) == self.SENT.replace(minute=13, second=0)
+
+    def test_deadline_over_middernacht(self):
+        sent = datetime.fromisoformat("2026-10-29T23:58:00+01:00")
+        deadline = orchestrator.payment_deadline_for({**self.SLOT, "hold_until": "00:13"}, sent)
+        assert deadline == datetime.fromisoformat("2026-10-30T00:13:00+01:00")
+
+    def test_zonder_orderpagina_ideal_termijn(self):
+        assert orchestrator.payment_deadline_for(self.SLOT, self.SENT) == self.SENT + timedelta(minutes=15)
 
     def test_nog_niet_aan_de_beurt_haalt_niets_op(self, tmp_path, monkeypatch):
         self._add(tmp_path)
@@ -487,7 +509,7 @@ class TestBetaalherinnering:
         self._add(tmp_path)
         sent, refreshed = self._remind(tmp_path, monkeypatch, self.SENT + timedelta(minutes=8), future=[])
         assert refreshed and len(sent) == 1
-        club, booked_date, _, url, deadline = sent[0]
+        club, booked_date, _, url, deadline, _order = sent[0]
         assert (club, booked_date, url) == ("Hal 0172", "2026-11-12", self.SLOT["payment_url"])
         assert deadline == self.SENT + timedelta(minutes=15)
         assert orchestrator.next_reminder_at(tmp_path / "pending.json") is None  # maar één keer

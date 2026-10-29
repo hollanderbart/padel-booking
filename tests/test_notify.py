@@ -26,7 +26,7 @@ class TestNotifierSendRouting:
         n = Notifier()
         with patch.object(n, "_send_ha_push") as mock_ha:
             n.send("Titel", "Bericht")
-        mock_ha.assert_called_once_with("Titel", "Bericht", "", False)
+        mock_ha.assert_called_once_with("Titel", "Bericht", "", False, None)
 
     def test_zonder_token_darwin_stuurt_macos(self, monkeypatch):
         monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
@@ -49,7 +49,7 @@ class TestNotifierSendRouting:
         n = Notifier()
         with patch.object(n, "_send_ha_push") as mock_ha:
             n.send("T", "M", url="https://pay.nl")
-        mock_ha.assert_called_once_with("T", "M", "https://pay.nl", False)
+        mock_ha.assert_called_once_with("T", "M", "https://pay.nl", False, None)
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +249,7 @@ class TestBetaalmelding:
                                      "2026-11-12", "meetandplay", datetime(2026, 11, 1, 20, 15))
         kwargs = MockNotifier.return_value.send.call_args.kwargs
         assert kwargs["title"] == "Betaal vóór 20:15: Hal 0172, do 12-11 20:00"
-        assert "15 minuten" in kwargs["message"]
+        assert "vóór 20:15" in kwargs["message"]
         assert kwargs["time_sensitive"] is True
         assert kwargs["url"] == "https://www.mollie.com/x"
 
@@ -265,3 +265,33 @@ class TestBetaalmelding:
         kwargs = MockNotifier.return_value.send.call_args.kwargs
         assert kwargs["title"] == "Nog niet betaald — vóór 20:15: Hal 0172, do 12-11 20:00"
         assert kwargs["time_sensitive"] is True and kwargs["url"] == "https://www.mollie.com/x"
+
+
+class TestOrderKnop:
+    ORDER = "https://meetandplay.nl/mijn-aankopen/order/88191/abc"
+
+    def test_payload_bevat_actieknop(self, monkeypatch):
+        monkeypatch.setenv("SUPERVISOR_TOKEN", "t")
+        with patch("notify._requests") as mock_requests:
+            Notifier()._send_ha_push("T", "M", url="https://www.mollie.com/x", actions=[{"action": "URI", "uri": "u"}])
+        assert mock_requests.post.call_args[1]["json"]["data"]["actions"] == [{"action": "URI", "uri": "u"}]
+
+    def test_melding_met_order_heeft_knop_naar_meet_and_play(self):
+        with patch("notify.Notifier") as MockNotifier:
+            notify_booking_available("Baan 1", "10:00 - 11:30", "Hal 0172 — Weg 1", "https://www.mollie.com/x",
+                                     "2026-11-11", "meetandplay", datetime(2026, 10, 29, 13, 9), self.ORDER)
+        kwargs = MockNotifier.return_value.send.call_args.kwargs
+        assert kwargs["url"] == "https://www.mollie.com/x"  # tik = Mollie, werkt zonder login
+        assert kwargs["actions"] == [{"action": "URI", "title": "Open in Meet & Play", "uri": self.ORDER}]
+        assert "Betaling starten" in kwargs["message"]
+
+    def test_zonder_betaallink_opent_tik_de_order(self):
+        with patch("notify.Notifier") as MockNotifier:
+            notify_booking_available("Baan 1", "10:00", "Hal 0172 — Weg 1", "", "2026-11-11", "meetandplay",
+                                     None, self.ORDER)
+        assert MockNotifier.return_value.send.call_args.kwargs["url"] == self.ORDER
+
+    def test_herinnering_met_order_heeft_knop(self):
+        with patch("notify.Notifier") as MockNotifier:
+            notify_payment_reminder("Hal 0172", "2026-11-11", "10:00", "https://www.mollie.com/x", None, self.ORDER)
+        assert MockNotifier.return_value.send.call_args.kwargs["actions"][0]["uri"] == self.ORDER

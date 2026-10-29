@@ -353,24 +353,38 @@ via meetandplay
 Padelbaan 1 — 20:00 - 21:30 90 minuten
 Hal 0172 — Nieuwveenseweg 39A, Nieuwkoop
 
-Tik om te betalen. Niet betaald binnen 15 minuten = reservering vervalt.
+Tik om te betalen. Niet betaald vóór 20:15 = reservering vervalt.
+Werkt de link niet? Kies 'Open in Meet & Play' (ingelogd) → Betaling starten.
+                                                      [ Open in Meet & Play ]
 ```
 
-**Je hebt 15 minuten.** Meet & Play betaalt via iDEAL (Mollie). Een iDEAL-betaling verloopt na
-15 minuten ([Mollie](https://docs.mollie.com/docs/handling-payment-status)), en daarna annuleert Meet & Play
-de reservering (`Geannuleerd` onder "Aankomend"). Die termijn kan niet verlengd worden: hij hoort bij de
-betaalmethode, niet bij de addon of de club. Een onbetaalde reservering staat trouwens niet onder
-"Aankomend" zolang hij openstaat, alleen als hij betaald of geannuleerd is.
+Er zijn twee manieren om te betalen:
+
+1. **Tik op de melding**: opent de Mollie-betaalpagina (iDEAL | Wero). Die werkt op elk apparaat, ook zonder
+   in te loggen bij Meet & Play.
+2. **Knop "Open in Meet & Play"** (melding lang indrukken of uitklappen): opent de reservering in je account
+   (`meetandplay.nl/mijn-aankopen/order/…`). Daar staat "In afwachting van betaling", tot hoe laat hij wordt
+   vastgehouden, en de knop **Betaling starten**. Dat werkt op elk apparaat waarop je bij Meet & Play bent ingelogd,
+   en is de terugvaloptie als de betaallink niet werkt (bijv. bij een club met een eigen boekingssite).
+
+**Je hebt 15 minuten.** Meet & Play houdt een onbetaalde reservering 15 minuten vast ("De reservering wordt tot
+13:09 vastgehouden, daarna wordt de reservering geannuleerd"); dat komt overeen met de iDEAL-termijn van Mollie
+([Mollie](https://docs.mollie.com/docs/handling-payment-status)). Daarna staat hij als `Geannuleerd` onder
+"Aankomend". De termijn kan niet verlengd worden: opnieuw op Betaling starten drukken maakt een nieuwe
+betaalpagina voor dezelfde order, maar de vasthoudtijd blijft gelijk. De addon leest de vasthoudtijd van de
+orderpagina en zet die in de titel; lukt dat niet, dan rekent hij met 15 minuten na de melding. Zolang hij
+openstaat, staat de reservering onder "Aankomend" als "In afwachting van betaling".
 
 - **Time-sensitive**: betaalmeldingen hebben `interruption-level: time-sensitive`. Op iOS komen ze daardoor door
   Focus en Slaap heen en blijven ze op het toegangsscherm staan. Zet daarvoor op je iPhone **Instellingen →
   Meldingen → Home Assistant → Tijdgevoelige meldingen** aan.
-- **Herinnering na 8 minuten**: is de reservering dan nog niet betaald (na het opnieuw ophalen van je reserveringen
-  staat de datum niet als `Betaald` in `future_bookings.json`), dan volgt één herinnering: "Nog niet betaald — vóór 20:15:
-  …". Openstaande herinneringen staan in `/config/padel/pending_payments.json`. In `schedule_mode: smart` stuurt de
+- **Herinnering 7 minuten vóór de deadline** (bij 15 minuten vasthouden dus 8 minuten na de melding): is de
+  reservering dan nog niet betaald (na het opnieuw ophalen van je reserveringen staat de datum niet als `Betaald` in
+  `future_bookings.json`), dan volgt één herinnering: "Nog niet betaald — vóór 20:15: …", met dezelfde link en knop.
+  Openstaande herinneringen staan in `/config/padel/pending_payments.json`. In `schedule_mode: smart` stuurt de
   planner ze tussen runs door (niet vlak vóór een geplande run); in `nightly` wacht de addon er na de run op.
-- De deadline staat alleen in de titel bij een Mollie/iDEAL-link. Komt de link op de boekingssite van de club uit,
-  dan is de termijn onbekend en staat er "Padelbaan beschikbaar: …".
+- Zonder vasthoudtijd van de orderpagina en zonder Mollie/iDEAL-link (bijv. de boekingssite van een club) is de
+  termijn onbekend: dan staat er "Padelbaan beschikbaar: …" en volgt de herinnering 8 minuten na de melding.
 
 Er worden **geen** notificaties gestuurd als er geen baan gevonden wordt.
 

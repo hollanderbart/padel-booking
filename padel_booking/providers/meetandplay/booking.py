@@ -53,6 +53,12 @@ PAY_BUTTON_SELECTORS = [
     'a:has-text("Betalen")',
 ]
 PAY_ATTEMPTS = 2
+# Je eigen reserveringen; een onbetaalde staat er als "In afwachting van betaling" met een orderpagina
+# ("De reservering wordt tot 13:09 vastgehouden" + knop "Betaling starten"), op elk ingelogd apparaat
+ORDERS_URL = "https://meetandplay.nl/mijn-aankopen"
+ORDER_CARD_SELECTOR = "a.timeslot.--order-item"
+HOLD_UNTIL_RE = re.compile(r"wordt tot (\d{1,2}:\d{2}) vastgehouden")
+MONTHS_NL = ("jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec")
 # Gerichte run op een vrijgavemoment: clubdagen staan vooraf open en worden vanaf het moment ververst
 RELEASE_LEAD = timedelta(seconds=3)    # al iets eerder verversen, voor klokverschil met de server
 RELEASE_POLL = timedelta(seconds=90)   # zo lang na het vrijgavemoment blijven verversen
@@ -688,15 +694,52 @@ class MeetAndPlayBooker:
         if not booked:
             logger.warning("Boeking mislukt bij %s op %s", club["name"], booking_date.strftime("%d-%m-%Y"))
             return None
+        slot_info.update(self._pending_order(booking_date, slot_info))
         return ProviderResult(
             success=True,
             provider=PROVIDER,
             booked_date=booking_date.strftime("%Y-%m-%d"),
             slot_info={
                 key: slot_info.get(key, "")
-                for key in ("club_name", "club_address", "court_name", "time_range", "payment_url")
+                for key in ("club_name", "club_address", "court_name", "time_range", "payment_url",
+                            "order_url", "hold_until")
             },
         )
+
+    def _pending_order(self, booking_date: datetime, slot_info: dict) -> dict:
+        """
+        Zoek de net gemaakte reservering in je account: de orderpagina (betaalbaar vanaf elk apparaat
+        waarop je bent ingelogd) en tot hoe laat hij wordt vastgehouden. Leeg als dat niet lukt.
+        """
+        start = re.search(r"\d{1,2}:\d{2}", slot_info.get("time_range", ""))
+        day = f"{booking_date.day} {MONTHS_NL[booking_date.month - 1]}"
+        page = None
+        try:
+            page = self._context.new_page()
+            page.goto(ORDERS_URL, wait_until="load", timeout=30000)
+            page.wait_for_selector(ORDER_CARD_SELECTOR, timeout=10000)
+            for card in page.locator(ORDER_CARD_SELECTOR).all():
+                text = re.sub(r"\s+", " ", card.inner_text()).lower()
+                if (text.startswith(day) and "afwachting van betaling" in text
+                        and slot_info.get("club_name", "").lower() in text
+                        and (not start or start.group(0) in text)):
+                    href = card.get_attribute("href") or ""
+                    order_url = href if href.startswith("http") else f"https://meetandplay.nl{href}"
+                    page.goto(order_url, wait_until="load", timeout=30000)
+                    with contextlib.suppress(Exception):  # de tekst laadt iets later in
+                        page.wait_for_selector("text=vastgehouden", timeout=8000)
+                    hold = HOLD_UNTIL_RE.search(page.inner_text("body"))
+                    logger.info("Reservering in je account: %s, vastgehouden tot %s",
+                                order_url, hold.group(1) if hold else "onbekend")
+                    return {"order_url": order_url, "hold_until": hold.group(1) if hold else ""}
+            logger.info("Openstaande reservering niet gevonden in je account (%s)", ORDERS_URL)
+        except Exception as e:  # noqa: BLE001 — de betaallink is er al; dit is een aanvulling
+            logger.info("Openstaande reservering niet opgehaald: %s", e)
+        finally:
+            if page:
+                with contextlib.suppress(Exception):
+                    page.close()
+        return {}
 
     def _try_dates_and_clubs(self, page: Page, booking_dates: list[datetime], clubs: list[dict]) -> ProviderResult:
         for booking_date in booking_dates:

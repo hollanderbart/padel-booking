@@ -958,6 +958,67 @@ class TestBookAtRelease:
         assert release.call_args.args[3].isoformat() == "2026-10-15T20:00:00+02:00"
 
 
+class TestPendingOrder:
+    """Na de betaallink: de reservering in je account opzoeken (orderpagina + vasthoudtijd)."""
+
+    def _page(self, cards, order_text="De reservering wordt tot 13:09 vastgehouden, daarna wordt de reservering geannuleerd"):
+        page = MagicMock()
+        card_mocks = []
+        for text, href in cards:
+            card = MagicMock()
+            card.inner_text.return_value = text
+            card.get_attribute.return_value = href
+            card_mocks.append(card)
+        page.locator.return_value.all.return_value = card_mocks
+        page.inner_text.return_value = order_text
+        return page
+
+    def _booker(self, page):
+        booker = _make_booker()
+        booker._context = MagicMock()
+        booker._context.new_page.return_value = page
+        return booker
+
+    SLOT = {"club_name": "Hal 0172", "time_range": "10:00 - 11:30 90 minuten"}
+
+    def test_vindt_openstaande_order_en_vasthoudtijd(self):
+        page = self._page([
+            ("22 OKT 20:00 - 21:30 Padelbaan 4 - Tennis en Padel Meerzicht Betaald", "/mijn-aankopen/order/1/a"),
+            ("11 NOV 10:00 - 11:30 90 minuten Padelbaan 1 - Hal 0172 In afwachting van betaling", "/mijn-aankopen/order/88191/b"),
+        ])
+        result = self._booker(page)._pending_order(datetime(2026, 11, 11), self.SLOT)
+        assert result == {"order_url": "https://meetandplay.nl/mijn-aankopen/order/88191/b", "hold_until": "13:09"}
+        page.close.assert_called_once()
+
+    def test_betaalde_of_andere_order_telt_niet(self):
+        page = self._page([("11 NOV 10:00 - 11:30 Padelbaan 1 - Hal 0172 Betaald", "/mijn-aankopen/order/88191/b")])
+        assert self._booker(page)._pending_order(datetime(2026, 11, 11), self.SLOT) == {}
+
+    def test_andere_starttijd_telt_niet(self):
+        page = self._page([("11 NOV 12:00 - 13:30 Padelbaan 1 - Hal 0172 In afwachting van betaling", "/x")])
+        assert self._booker(page)._pending_order(datetime(2026, 11, 11), self.SLOT) == {}
+
+    def test_zonder_vasthoudtekst_wel_orderlink(self):
+        page = self._page([("11 NOV 10:00 - 11:30 Hal 0172 In afwachting van betaling", "https://meetandplay.nl/o/1")],
+                          order_text="Reservering")
+        assert self._booker(page)._pending_order(datetime(2026, 11, 11), self.SLOT) == {
+            "order_url": "https://meetandplay.nl/o/1", "hold_until": ""}
+
+    def test_fout_geeft_leeg_resultaat(self):
+        page = self._page([])
+        page.goto.side_effect = Exception("timeout")
+        assert self._booker(page)._pending_order(datetime(2026, 11, 11), self.SLOT) == {}
+
+    def test_boekingsresultaat_bevat_order(self):
+        booker = _make_booker()
+        booker._book_timeslot = MagicMock(return_value=True)
+        booker._pending_order = MagicMock(return_value={"order_url": "https://o", "hold_until": "13:09"})
+        slot = {"club_name": "Hal 0172", "club_address": "", "court_name": "Baan 1", "time_range": "10:00",
+                "payment_url": "https://www.mollie.com/x"}
+        result = booker._book_found_slot(MagicMock(), {"name": "Hal 0172"}, datetime(2026, 11, 11), slot)
+        assert result.slot_info["order_url"] == "https://o" and result.slot_info["hold_until"] == "13:09"
+
+
 class TestDistanceOption:
     @pytest.mark.parametrize("radius,expected", [
         (10, "10"), (20, "20"), (15, "20"), (3, "5"), (75, "100"), ("20", "20"), (1000, "400"),
