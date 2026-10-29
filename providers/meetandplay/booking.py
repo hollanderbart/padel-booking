@@ -7,7 +7,8 @@ import contextlib
 import html
 import logging
 import re
-from datetime import datetime
+import time as time_mod
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Locator, Page, sync_playwright
@@ -16,6 +17,7 @@ from providers.base import (
     ProviderResult,
     booking_days,
     hhmm_to_minutes,
+    in_time_window,
     upcoming_booking_dates,
     without_skip_dates,
 )
@@ -51,6 +53,11 @@ PAY_BUTTON_SELECTORS = [
     'a:has-text("Betalen")',
 ]
 PAY_ATTEMPTS = 2
+# Gerichte run op een vrijgavemoment: clubdagen staan vooraf open en worden vanaf het moment ververst
+RELEASE_LEAD = timedelta(seconds=3)    # al iets eerder verversen, voor klokverschil met de server
+RELEASE_POLL = timedelta(seconds=90)   # zo lang na het vrijgavemoment blijven verversen
+POLL_INTERVAL = 2                      # seconden tussen verversrondes
+MAX_RELEASE_TABS = 6
 # Waarden van de afstand-dropdown op /zoeken (400 = "Toon alles")
 DISTANCE_OPTIONS_KM = (5, 10, 20, 50, 100, 150, 200, 400)
 # De zoekpagina bevat de coördinaten van alle clubs (Livewire-params van de kaart)
@@ -207,14 +214,26 @@ class MeetAndPlayBooker:
             page.wait_for_timeout(1500)
 
     @staticmethod
-    def _set_livewire_date(page: Page, date_str: str) -> bool:
-        """Zet de datum via het Livewire-component; False als het component ontbreekt."""
+    def _livewire_date_id(page: Page) -> str | None:
         lw_match = LIVEWIRE_DATE_RE.search(page.content())
-        if not lw_match:
+        return lw_match.group(1) if lw_match else None
+
+    @classmethod
+    def _set_livewire_date(cls, page: Page, date_str: str) -> bool:
+        """Zet de datum via het Livewire-component; False als het component ontbreekt."""
+        component_id = cls._livewire_date_id(page)
+        if not component_id:
             return False
-        page.evaluate(f"window.Livewire.find('{lw_match.group(1)}').set('date', '{date_str}')")
+        page.evaluate(f"window.Livewire.find('{component_id}').set('date', '{date_str}')")
         page.wait_for_timeout(2500)
         return True
+
+    @staticmethod
+    def _refresh_livewire(page: Page, component_id: str) -> None:
+        """Beschikbaarheid opnieuw ophalen ($refresh van het datumcomponent), zonder de pagina te herladen."""
+        with page.expect_response(lambda r: "livewire" in r.url, timeout=10000):
+            page.evaluate(f"window.Livewire.find('{component_id}').$refresh()")
+        page.wait_for_timeout(300)
 
     # ------------------------------------------------------------------
     # Login
@@ -419,7 +438,7 @@ class MeetAndPlayBooker:
             return None
 
         time_start, time_end = self._booking["time_start"], self._booking["time_end"]
-        if not (hhmm_to_minutes(time_start) <= slot_start_min < hhmm_to_minutes(time_end)):
+        if not in_time_window(slot_start_min, self._booking):
             logger.info(
                 "Slot %d overgeslagen: tijd %s buiten venster %s–%s (label: %r)",
                 i, slot_start_str, time_start, time_end, label
@@ -444,11 +463,14 @@ class MeetAndPlayBooker:
         }
 
     def _find_timeslot(self, page: Page, club: dict, booking_date: datetime | None = None) -> dict | None:
-        duration_minutes = int(self._booking.get("duration_minutes", 90))
         if booking_date is None:
             booking_date = self._get_upcoming_booking_dates(count=1)[0]
-        date_str = booking_date.strftime("%d-%m-%Y")
+        self._open_club_day(page, club, booking_date)
+        return self._pick_slot(page, club)
 
+    def _open_club_day(self, page: Page, club: dict, booking_date: datetime) -> None:
+        """Open de clubpagina met de filters en datum ingesteld; daarna kan _pick_slot kijken."""
+        date_str = booking_date.strftime("%d-%m-%Y")
         logger.info(
             "Controleren tijdsloten bij %s voor %s (%s–%s)...",
             club["name"], date_str, self._booking["time_start"], self._booking["time_end"]
@@ -457,18 +479,20 @@ class MeetAndPlayBooker:
         page.goto(club["url"], wait_until="load", timeout=60000)
         page.wait_for_timeout(1500)
         self._accept_cookies(page)
-        self._apply_club_filters(page, duration_minutes)
+        self._apply_club_filters(page, int(self._booking.get("duration_minutes", 90)))
         self._set_livewire_date(page, date_str)
 
+    def _pick_slot(self, page: Page, club: dict, verbose: bool = True) -> dict | None:
+        """Zoek op de geopende clubdag een geschikt slot. `verbose=False` logt tussenstappen op debug."""
+        log = logger.info if verbose else logger.debug
+        duration_minutes = int(self._booking.get("duration_minutes", 90))
         start_times = self._available_start_times(page)
         if start_times is None:
             slot_info = self._match_listed_slots(page, club, duration_minutes)
         else:
             # De slotlijst toont alleen de geselecteerde starttijd: loop alle tijden in het venster af
-            window_start = hhmm_to_minutes(self._booking["time_start"])
-            window_end = hhmm_to_minutes(self._booking["time_end"])
-            in_window = [t for t in start_times if window_start <= hhmm_to_minutes(t) < window_end]
-            logger.info(
+            in_window = [t for t in start_times if in_time_window(hhmm_to_minutes(t), self._booking)]
+            log(
                 "Beschikbare starttijden bij %s: %s — binnen venster: %s",
                 club["name"], ", ".join(start_times) or "geen", ", ".join(in_window) or "geen",
             )
@@ -480,7 +504,7 @@ class MeetAndPlayBooker:
                     break
 
         if not slot_info:
-            logger.info("Geen geschikt tijdslot gevonden bij %s", club["name"])
+            log("Geen geschikt tijdslot gevonden bij %s", club["name"])
         return slot_info
 
     # ------------------------------------------------------------------
@@ -648,6 +672,32 @@ class MeetAndPlayBooker:
     # Hoofdflow
     # ------------------------------------------------------------------
 
+    def _book_found_slot(self, page: Page, club: dict, booking_date: datetime, slot_info: dict) -> ProviderResult | None:
+        """Boek een gevonden slot. Geeft het resultaat terug, of None als boeken mislukte."""
+        if self._dry_run:
+            logger.info("Dry-run: tijdslot gevonden maar boeking overgeslagen")
+            return _failure("dry_run — tijdslot gevonden maar niet geboekt")
+
+        try:
+            booked = self._book_timeslot(page, slot_info)
+        except PendingReservationError:
+            page = self._fresh_session_page()
+            slot_info = self._find_timeslot(page, club, booking_date=booking_date)
+            booked = bool(slot_info) and self._book_timeslot(page, slot_info)
+
+        if not booked:
+            logger.warning("Boeking mislukt bij %s op %s", club["name"], booking_date.strftime("%d-%m-%Y"))
+            return None
+        return ProviderResult(
+            success=True,
+            provider=PROVIDER,
+            booked_date=booking_date.strftime("%Y-%m-%d"),
+            slot_info={
+                key: slot_info.get(key, "")
+                for key in ("club_name", "club_address", "court_name", "time_range", "payment_url")
+            },
+        )
+
     def _try_dates_and_clubs(self, page: Page, booking_dates: list[datetime], clubs: list[dict]) -> ProviderResult:
         for booking_date in booking_dates:
             date_str = booking_date.strftime("%d-%m-%Y")
@@ -659,34 +709,72 @@ class MeetAndPlayBooker:
                     logger.warning("Fout bij %s op %s: %s", club["name"], date_str, club_err)
                     continue
 
+                if slot_info and (result := self._book_found_slot(page, club, booking_date, slot_info)):
+                    return result
+
+        return _failure(f"Geen tijdslot gevonden voor {len(booking_dates)} datum(s) bij {len(clubs)} club(s)")
+
+    def _book_at_release(
+        self, page: Page, booking_dates: list[datetime], clubs: list[dict], release_at: datetime,
+    ) -> ProviderResult:
+        """
+        Gerichte run op een vrijgavemoment. Inloggen en de clubdagen openen (elk in een eigen
+        tabblad) gebeurt vóór het moment; vanaf het moment wordt elke paar seconden ververst, zodat
+        een vrijgekomen slot binnen seconden in de winkelwagen ligt in plaats van na een hele run.
+        """
+        tabs = []
+        for booking_date, club in [(d, c) for d in booking_dates for c in clubs][:MAX_RELEASE_TABS]:
+            tab = page if not tabs else self._context.new_page()
+            try:
+                self._open_club_day(tab, club, booking_date)
+                component_id = self._livewire_date_id(tab)
+            except Exception as e:  # noqa: BLE001 — één club mag de vrijgave niet afbreken
+                logger.warning("Voorbereiden %s mislukt: %s", club["name"], e)
+                continue
+            if component_id:
+                tabs.append((booking_date, club, tab, component_id))
+            else:
+                logger.warning("Livewire datum-component niet gevonden bij %s — niet verversen", club["name"])
+        if not tabs:
+            return self._try_dates_and_clubs(page, booking_dates, clubs)
+
+        wait = (release_at - RELEASE_LEAD - datetime.now(release_at.tzinfo)).total_seconds()
+        logger.info("Klaar voor vrijgave om %s: %d clubdag(en) open, %.0f s wachten",
+                    release_at.strftime("%H:%M:%S"), len(tabs), max(wait, 0))
+        if wait > 0:
+            time_mod.sleep(wait)
+
+        deadline = release_at + RELEASE_POLL
+        rounds = 0
+        while tabs:
+            rounds += 1
+            last_round = datetime.now(release_at.tzinfo) >= deadline
+            for entry in list(tabs):
+                booking_date, club, tab, component_id = entry
+                try:
+                    self._refresh_livewire(tab, component_id)
+                    slot_info = self._pick_slot(tab, club, verbose=rounds == 1 or last_round)
+                except Exception as e:  # noqa: BLE001 — tabblad laten vallen, de rest blijft verversen
+                    logger.warning("Verversen %s mislukt: %s", club["name"], e)
+                    tabs.remove(entry)
+                    continue
                 if not slot_info:
                     continue
+                elapsed = (datetime.now(release_at.tzinfo) - release_at).total_seconds()
+                logger.info("Slot gezien bij %s, %+.1f s na vrijgave (ronde %d)", club["name"], elapsed, rounds)
+                if result := self._book_found_slot(tab, club, booking_date, slot_info):
+                    return result
+                # Het tabblad staat nu op de winkelwagen: dag opnieuw openen en verder verversen
+                tabs.remove(entry)
+                with contextlib.suppress(Exception):
+                    self._open_club_day(tab, club, booking_date)
+                    if new_id := self._livewire_date_id(tab):
+                        tabs.append((booking_date, club, tab, new_id))
+            if last_round:
+                break
+            time_mod.sleep(POLL_INTERVAL)
 
-                if self._dry_run:
-                    logger.info("Dry-run: tijdslot gevonden maar boeking overgeslagen")
-                    return _failure("dry_run — tijdslot gevonden maar niet geboekt")
-
-                try:
-                    booked = self._book_timeslot(page, slot_info)
-                except PendingReservationError:
-                    page = self._fresh_session_page()
-                    slot_info = self._find_timeslot(page, club, booking_date=booking_date)
-                    booked = bool(slot_info) and self._book_timeslot(page, slot_info)
-
-                if booked:
-                    return ProviderResult(
-                        success=True,
-                        provider=PROVIDER,
-                        booked_date=booking_date.strftime("%Y-%m-%d"),
-                        slot_info={
-                            key: slot_info.get(key, "")
-                            for key in ("club_name", "club_address", "court_name", "time_range", "payment_url")
-                        },
-                    )
-                logger.warning(
-                    "Boeking mislukt bij %s op %s, volgende club proberen...", club["name"], date_str,
-                )
-
+        logger.info("Geen slot binnen %d s na vrijgave (%d verversronde(s))", RELEASE_POLL.total_seconds(), rounds)
         return _failure(f"Geen tijdslot gevonden voor {len(booking_dates)} datum(s) bij {len(clubs)} club(s)")
 
     def run(self) -> ProviderResult:
@@ -725,6 +813,8 @@ class MeetAndPlayBooker:
                     logger.warning("Geen clubs gevonden met de opgegeven filters")
                     return _failure("Geen clubs gevonden")
 
+                if release_at := self._booking.get("release_at"):
+                    return self._book_at_release(page, booking_dates, clubs, datetime.fromisoformat(release_at))
                 return self._try_dates_and_clubs(page, booking_dates, clubs)
 
             except SiteUnreachableError as e:

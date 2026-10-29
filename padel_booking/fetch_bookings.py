@@ -119,9 +119,15 @@ DUTCH_MONTHS = {
 
 
 def _infer_date(day: int, month: int, today: date) -> date:
-    """De kaart toont geen jaar: neem het eerstvolgende voorkomen vanaf vandaag."""
-    candidate = date(today.year, month, day)
-    return candidate if candidate >= today else date(today.year + 1, month, day)
+    """
+    De kaart toont geen jaar: neem het voorkomen dat het dichtst bij vandaag ligt. 'Aankomend'
+    toont ook net verstreken reserveringen (22 okt op 23 okt); die horen bij dit jaar, niet bij het volgende.
+    """
+    candidates = []
+    for year in (today.year - 1, today.year, today.year + 1):
+        with contextlib.suppress(ValueError):  # 29 februari bestaat niet elk jaar
+            candidates.append(date(year, month, day))
+    return min(candidates, key=lambda d: abs((d - today).days))
 
 
 def _text(card, selector: str) -> str:
@@ -136,6 +142,9 @@ def _parse_order_card(card, today: date) -> dict | None:
         logger.debug("Geen datum gevonden in reserveringskaart: %s", card.inner_text()[:200])
         return None
     booked = _infer_date(int(day), month, today)
+    if booked < today:
+        logger.info("Reservering op %s overgeslagen (verstreken)", booked.isoformat())
+        return None
 
     names = card.locator(".timeslot-name")
     # Eerste regel van de eerste .timeslot-name: "Padelbaan 4 - Tennis en Padel Meerzicht"

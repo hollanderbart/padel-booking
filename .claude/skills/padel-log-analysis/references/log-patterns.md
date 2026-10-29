@@ -24,8 +24,20 @@ Run van HH:MM wordt ingehaald (N min te laat)        ← ≥ 2.7.1: run fell due
 Run gestart: ingehaalde volledige run (gemist: …) | ingehaald (…): …   ← ≥ 2.7.1: missed runs merged
 ```
 
-A targeted run that books nothing is retried at +1 min and +5 min (`RETRY_DELAYS`), which is
-why release runs show up in triples (`HH:00:05`, `HH:01:05`, `HH:05:05`).
+**Since v2.9.0** a targeted run starts 2 min before the release (`PREPARE_AHEAD`): `Run gestart:
+vrijgave … — vrijgave om HH:MM:SS` at `HH:58:00`, then `Klaar voor vrijgave om …: N clubdag(en) open,
+X s wachten`, then 90 s of refreshes every ~2 s. It ends with `Slot gezien bij <club>, +N s na vrijgave`
+or `Geen slot binnen 90 s na vrijgave (N verversronde(s))`. If nothing was booked it runs once more at
+release +5 min, so release runs come in pairs (`HH:58:00`, `HH:05:00`). The `Slot gezien … +N s` delay is
+the measure of how fast the bot was. If the available start times in the first round (just before
+the release) already lack the window slots, and so does the last round, then the slot never came
+free for guests or someone else was faster. A prep that ends with `0 s wachten` started too late
+(slow login or many tabs).
+Before v2.9.0 targeted runs started 5 s after the release and were retried at +1 and +5 min, so they
+showed up in triples (`HH:00:05`, `HH:01:05`, `HH:05:05`), with the first look 30–65 s after the release.
+
+**Since v2.9.0** `booking_time_end` is inclusive (the latest start time). Before that, a slot starting
+exactly at `time_end` was dropped (`binnen venster: geen` with e.g. `21:00` in the list).
 
 **Nightly mode** (`run.sh`, one run per addon start): `fetch_bookings.py`, then the orchestrator,
 with no `Run gestart` lines.

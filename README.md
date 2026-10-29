@@ -65,7 +65,7 @@ Ga naar **Settings → Add-ons → Padel Booking → Configuration** en vul in:
 | `location_longitude` | Lengtegraad voor Playtomic zoeken (bijv. `4.66`) |
 | `booking_days` | Eén of meer weekdagen om te boeken, bijv. `thursday` of `tuesday` + `thursday` (standaard `thursday`). Vervangt `booking_day` uit versies vóór 2.5.0 — na de update staat `booking_days` op `thursday`; controleer dit als je een andere dag had |
 | `booking_time_start` | Vroegste starttijd (bijv. `19:30`) |
-| `booking_time_end` | Laatste starttijd (bijv. `21:00`) |
+| `booking_time_end` | Laatste starttijd, inclusief: met `21:00` telt een slot van 21:00 ook mee (bijv. `21:00`) |
 | `duration_minutes` | Duur van de boeking: `60` of `90` minuten |
 | `court_type` | Baantype: `indoor` of `outdoor` |
 | `game_type` | Speltype: `double` (4 spelers) of `single` (2 spelers) |
@@ -134,7 +134,7 @@ Of voeg dit toe aan `automations.yaml`:
 
 ## Toekomstige boekingen in Home Assistant
 
-Vóór elke volledige run (bij het starten van de addon en om 00:01) haalt de addon live je toekomstige reserveringen op (Meet & Play via [mijn-aankopen](https://meetandplay.nl/mijn-aankopen), Playtomic via de API als die provider aan staat) en schrijft ze naar `/config/padel/future_bookings.json`. De booker slaat die datums over (`skip_booked_dates`), en je kunt ze weergeven in een Lovelace dashboard.
+Vóór elke volledige run (bij het starten van de addon en om 00:01) haalt de addon live je toekomstige reserveringen op (Meet & Play via [mijn-aankopen](https://meetandplay.nl/mijn-aankopen), Playtomic via de API als die provider aan staat) en schrijft ze naar `/config/padel/future_bookings.json`. De booker slaat die datums over (`skip_booked_dates`), en je kunt ze weergeven in een Lovelace dashboard. Meet & Play toont op de kaarten geen jaar en laat net verstreken reserveringen nog even onder "Aankomend" staan; de addon neemt het jaar dat het dichtst bij vandaag ligt en laat verstreken reserveringen weg (`Reservering op … overgeslagen (verstreken)`).
 
 Lukt het ophalen niet (bijv. inloggen mislukt), dan blijft het bestaande bestand staan — anders zou de booker
 datums die al geboekt zijn opnieuw proberen. Alleen dit bestand bepaalt welke datums als geboekt
@@ -306,16 +306,29 @@ en in de samenvatting van elke workflow-run.
 `scheduler.py` haalt elke 6 uur `club_schedule.json` op van de `booking-research` branch (met een
 cache in `/config/padel/club_schedule.json`) en plant voor elke doeldag (alle `booking_days`) binnen `weeks_ahead`:
 
-- **rollende clubs**: een run N dagen vóór de doeldag op elke starttijd binnen het tijdvenster
-  (bijv. 19:30, 20:00 en 20:30)
+- **rollende clubs**: een run N dagen vóór de doeldag op elke starttijd binnen het tijdvenster,
+  inclusief `booking_time_end` (bijv. 19:30, 20:00, 20:30 en 21:00)
 - **dagelijkse clubs**: een run N dagen vóór de doeldag op het vrijgave-uur
 - **altijd**: een volledige run om 00:01 (alle clubs, alle open datums) als vangnet, en bij het starten van de addon.
   Vóór een volledige run worden eerst je reserveringen opgehaald; gerichte runs doen dat niet, zodat ze
   precies op het vrijgavemoment starten (ze gebruiken de reserveringen van de laatste volledige run)
 
-Een gerichte run gaat direct naar de clubpagina (geen zoekpagina) en wordt na 1 en 5 minuten herhaald
-als er nog niets vrij was. Runs draaien na elkaar: valt een run terwijl een andere nog bezig is (bijv. de
-nachtrun van 00:01 tijdens een gerichte run van 00:00 met retries), dan wordt hij direct daarna ingehaald
+Een gerichte run start **2 minuten vóór** het vrijgavemoment. In die tijd logt de booker in (de sessie
+is dan meestal verlopen) en opent hij elke clubdag met filters en datum in een eigen tabblad. Vanaf 3 seconden
+vóór het moment ververst hij die dagen elke ~2 seconden (Livewire `$refresh`, zonder de pagina te herladen),
+90 seconden lang. Een slot dat vrijkomt ligt zo binnen enkele seconden in de winkelwagen; voorheen startte de
+run pas op het moment zelf en keek hij pas na 30–65 seconden (browser starten, inloggen, pagina laden), als
+anderen de avondslots al hadden. Was er niets, dan volgt na 5 minuten nog een gewone poging. In de log:
+
+```
+Run gestart: vrijgave Hal 0172 (rollend, 14 d) — vrijgave om 20:00:00
+[meetandplay]  Klaar voor vrijgave om 20:00:00: 1 clubdag(en) open, 41 s wachten
+[meetandplay]  Slot gezien bij Hal 0172, +1.8 s na vrijgave (ronde 3)
+[meetandplay]  Geen slot binnen 90 s na vrijgave (42 verversronde(s))   ← als er niets kwam
+```
+
+De starttijden worden alleen in de eerste en laatste verversronde gelogd (met `--debug` elke ronde). Runs draaien na elkaar: valt een run terwijl een andere nog bezig is (bijv. de
+nachtrun van 00:01 tijdens een gerichte run voor 00:00 met retry), dan wordt hij direct daarna ingehaald
 (`Run van … wordt ingehaald` in de log). Zijn er meerdere gemist, dan worden ze samengevoegd tot één run.
 Zit er een volledige run tussen, dan wordt het één volledige run. Clubs met strategie "onvoldoende data" of "blok" worden alleen door de
 nachtelijke run gedekt. Let op: een club met een venster groter dan `weeks_ahead` weken (bijv. 30 dagen
@@ -463,12 +476,12 @@ Slot 7 overgeslagen: buitenbaan ('Buitenbaan dubbelspel')
 Sinds v2.3.4 logt de booker per club ook welke starttijden beschikbaar zijn en welke binnen het venster vallen:
 
 ```
-Beschikbare starttijden bij Sportcentrum midden Boskoop: 18:00, 19:30, 21:00 — binnen venster: 19:30
+Beschikbare starttijden bij Sportcentrum midden Boskoop: 18:00, 19:30, 21:30 — binnen venster: 19:30
 ```
 
 Mogelijke oorzaken:
 - **Versie ouder dan v2.3.4**: Meet & Play toont per keer alleen de slots van één starttijd; oudere versies keken alleen naar de eerste tijd
-- **Tijdvenster te smal**: het slot valt net buiten `booking_time_start`–`booking_time_end`
+- **Tijdvenster te smal**: het slot valt net buiten `booking_time_start`–`booking_time_end` (beide inclusief; vóór v2.9.0 telde een slot precies op `booking_time_end` niet mee)
 - **Duur mismatch**: de site toont bijv. "60 min" maar `duration_minutes` staat op `90`
 - **Buitenbaan filter**: het label van het slot bevat "buiten" terwijl `court_type=indoor`
 - **Enkelspel filter**: bij `game_type=double` worden banen overgeslagen met "enkelspel" in het label of "single" / "max. 2 spelers" in de baannaam

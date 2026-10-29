@@ -9,6 +9,9 @@ booking-research workflow, zie research/booking_windows.py) en plant gerichte ru
   dagelijks — doeldag D komt vrij op D − N dagen om uur H → run om H:00
   overig    — geen gerichte run; de nachtelijke volledige run (00:01) dekt deze clubs
 
+Een gerichte run start PREPARE_AHEAD vóór het vrijgavemoment: de provider logt dan al in, opent
+de clubdagen en ververst ze vanaf het moment zelf (zie MeetAndPlayBooker._book_at_release).
+
 Gebruik:
   python scheduler.py                              # draait continu (schedule_mode: smart)
   python scheduler.py --plan                       # toon de geplande runs voor 7 dagen en stop
@@ -45,8 +48,8 @@ RUN_TIMEOUT = 15 * 60                      # seconden per booking-run
 
 NIGHTLY_RUN = time(0, 1)                   # volledige run, vangnet voor clubs zonder bekende strategie
 SCHEDULE_REFRESH = timedelta(hours=6)
-RELEASE_DELAY = timedelta(seconds=5)       # kleine marge na het vrijgavemoment
-RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=5))
+PREPARE_AHEAD = timedelta(minutes=2)       # gerichte run start eerder: inloggen en clubdagen openen
+RETRY_DELAYS = (timedelta(minutes=5),)     # na het vrijgavemoment; de eerste run ververst zelf al 90 s
 SLOT_STEP_MIN = 30                         # Meet & Play starttijden liggen op een half-uur-raster
 MAX_SLEEP = 60                             # seconden; korte slaapstappen vangen klokwijzigingen op
 LATE_AFTER = timedelta(minutes=2)          # later gestart = ingehaald: gelogd, retries tellen vanaf nu
@@ -61,14 +64,23 @@ class PlannedRun:
     dates: tuple[str, ...] = ()            # leeg = volledige run (alle datums, alle clubs)
     clubs: tuple[tuple[str, str, str], ...] = ()   # (naam, url, adres)
     reason: str = ""
+    release_at: datetime | None = None     # vrijgavemoment van een gerichte run (die start eerder)
+
+    @property
+    def moment(self) -> datetime:
+        """Het moment waar de run om draait: de vrijgave, of de starttijd bij een volledige run."""
+        return self.release_at or self.at
 
     def target(self) -> dict | None:
         if not self.dates:
             return None
-        return {
+        target = {
             "dates": list(self.dates),
             "clubs": [{"name": n, "url": u, "address": a} for n, u, a in self.clubs],
         }
+        if self.release_at:
+            target["release_at"] = self.release_at.isoformat()
+        return target
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +99,7 @@ def release_moments(club: dict, target_date: date, booking_cfg: dict) -> list[da
         end = hhmm_to_minutes(booking_cfg["time_end"])
         return [
             datetime.combine(release_day, time(m // 60, m % 60), TZ)
-            for m in range(start, end, SLOT_STEP_MIN)
+            for m in range(start, end + 1, SLOT_STEP_MIN)   # time_end is de laatste starttijd
         ]
     if club.get("strategy") == DAILY:
         return [datetime.combine(release_day, time(hour), TZ) for hour in club.get("release_hours", [])]
@@ -101,8 +113,8 @@ def next_nightly(after: datetime) -> datetime:
 
 def plan_runs(schedule: dict, booking_cfg: dict, since: datetime, until: datetime) -> list[PlannedRun]:
     """
-    Alle runs met `since < at <= until`, gesorteerd. Gerichte runs op hetzelfde moment
-    worden samengevoegd; daarnaast altijd de nachtelijke volledige run.
+    Alle runs met `since < at <= until`, gesorteerd. Gerichte runs voor hetzelfde vrijgavemoment
+    worden samengevoegd en starten PREPARE_AHEAD eerder; daarnaast altijd de nachtelijke volledige run.
     """
     def targets_at(moment: datetime, extra_weeks: int = 0) -> list[date]:
         return [
@@ -120,16 +132,16 @@ def plan_runs(schedule: dict, booking_cfg: dict, since: datetime, until: datetim
     for club in schedule.get("clubs", []):
         for target_date in candidates:
             for moment in release_moments(club, target_date, booking_cfg):
-                at = moment + RELEASE_DELAY
-                if since < at <= until and target_date in targets_at(at):
-                    group = grouped.setdefault(at, {"dates": set(), "clubs": set(), "reasons": set()})
+                if since < moment - PREPARE_AHEAD <= until and target_date in targets_at(moment):
+                    group = grouped.setdefault(moment, {"dates": set(), "clubs": set(), "reasons": set()})
                     group["dates"].add(target_date.isoformat())
                     group["clubs"].add((club["club_name"], club["club_url"], club.get("club_address", "")))
                     group["reasons"].add(f"{club['club_name']} ({club['strategy']}, {club['window_days']} d)")
 
     runs = [
-        PlannedRun(at, tuple(sorted(g["dates"])), tuple(sorted(g["clubs"])), "vrijgave " + "; ".join(sorted(g["reasons"])))
-        for at, g in grouped.items()
+        PlannedRun(moment - PREPARE_AHEAD, tuple(sorted(g["dates"])), tuple(sorted(g["clubs"])),
+                   "vrijgave " + "; ".join(sorted(g["reasons"])), release_at=moment)
+        for moment, g in grouped.items()
     ]
     nightly = next_nightly(since)
     if nightly <= until:
@@ -149,12 +161,14 @@ def next_due(planned: list[PlannedRun], now: datetime) -> tuple[PlannedRun | Non
     due = [r for r in planned if r.at <= now]
     if len(due) <= 1:
         return (due[0] if due else None), due
-    missed = ", ".join(f"{r.at:%H:%M}" for r in due)
+    missed = ", ".join(f"{r.moment:%H:%M}" for r in due)
     if any(not r.dates for r in due):
         return PlannedRun(now, reason=f"ingehaalde volledige run (gemist: {missed})"), due
     dates = tuple(sorted({d for r in due for d in r.dates}))
     clubs = tuple(sorted({c for r in due for c in r.clubs}))
-    return PlannedRun(now, dates, clubs, f"ingehaald ({missed}): " + "; ".join(r.reason for r in due)), due
+    release_at = min(r.release_at for r in due if r.release_at) if any(r.release_at for r in due) else None
+    return PlannedRun(now, dates, clubs, f"ingehaald ({missed}): " + "; ".join(r.reason for r in due),
+                      release_at=release_at), due
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +244,8 @@ def run_booking(run: PlannedRun, debug: bool) -> int:
     target = run.target()
     if target:
         cmd += ["--target", json.dumps(target, ensure_ascii=False)]
-    logger.info("Run gestart: %s", run.reason or "volledige run")
+    logger.info("Run gestart: %s%s", run.reason or "volledige run",
+                f" — vrijgave om {run.release_at:%H:%M:%S}" if run.release_at else "")
     try:
         return subprocess.run(cmd, cwd=APP_DIR, timeout=RUN_TIMEOUT, check=False).returncode
     except subprocess.TimeoutExpired:
@@ -266,7 +281,7 @@ def execute(run: PlannedRun, config: dict, debug: bool) -> None:
         for delay in RETRY_DELAYS:
             if code == 0:
                 break
-            _sleep_until(run.at + delay)
+            _sleep_until(max(run.moment, run.at) + delay)   # ingehaalde run: vanaf de inhaalstart
             code = run_booking(run, debug)
 
 
@@ -307,7 +322,7 @@ def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug
         late = now - covered[0].at
         if late > LATE_AFTER:
             logger.info("Run van %s wordt ingehaald (%d min te laat)",
-                        ", ".join(f"{r.at:%H:%M}" for r in covered), late.total_seconds() // 60)
+                        ", ".join(f"{r.moment:%H:%M}" for r in covered), late.total_seconds() // 60)
             run = replace(run, at=now)
         try:
             execute(run, config, debug)
@@ -321,7 +336,7 @@ def print_plan(config: dict, schedule: dict, days: int = 7) -> None:
     for run in plan_runs(schedule, config["booking"], now, now + timedelta(days=days)):
         dates = ", ".join(run.dates) or "alle datums"
         clubs = ", ".join(name for name, _, _ in run.clubs) or "alle clubs"
-        print(f"{run.at:%a %Y-%m-%d %H:%M:%S}  {dates:24}  {clubs}")
+        print(f"{run.moment:%a %Y-%m-%d %H:%M:%S}  {dates:24}  {clubs}")
 
 
 def main() -> None:

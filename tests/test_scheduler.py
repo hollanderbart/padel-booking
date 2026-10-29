@@ -3,6 +3,7 @@ Unit tests voor scheduler.py — planning van gerichte runs op vrijgavemomenten.
 """
 
 import json
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -10,7 +11,7 @@ import pytest
 import scheduler
 from scheduler import (
     DAILY,
-    RELEASE_DELAY,
+    PREPARE_AHEAD,
     ROLLING,
     TZ,
     PlannedRun,
@@ -34,8 +35,9 @@ NOW = datetime(2026, 10, 14, 12, 0, tzinfo=TZ)  # woensdag
 class TestReleaseMoments:
     def test_rollend_elke_starttijd_in_venster_n_dagen_vooraf(self):
         moments = release_moments(ROLLING_CLUB, THURSDAY, BOOKING)
+        # time_end (21:00) is de laatste starttijd en krijgt dus ook een run
         assert [m.strftime("%Y-%m-%d %H:%M") for m in moments] == [
-            "2026-10-15 19:30", "2026-10-15 20:00", "2026-10-15 20:30",
+            "2026-10-15 19:30", "2026-10-15 20:00", "2026-10-15 20:30", "2026-10-15 21:00",
         ]
 
     def test_dagelijks_op_vrijgave_uur(self):
@@ -49,22 +51,23 @@ class TestPlanRuns:
     def test_plant_rollende_vrijgave_en_nachtelijke_run(self):
         runs = plan_runs({"clubs": [ROLLING_CLUB, UNKNOWN_CLUB]}, BOOKING, NOW, NOW + timedelta(days=2))
         targeted = [r for r in runs if r.dates]
-        assert [r.at for r in targeted] == [
-            datetime(2026, 10, 15, h, m, tzinfo=TZ) + RELEASE_DELAY for h, m in [(19, 30), (20, 0), (20, 30)]
-        ]
+        moments = [datetime(2026, 10, 15, h, m, tzinfo=TZ) for h, m in [(19, 30), (20, 0), (20, 30), (21, 0)]]
+        assert [r.release_at for r in targeted] == moments
+        # De run start eerder, zodat de provider op het moment zelf al ingelogd klaarstaat
+        assert [r.at for r in targeted] == [m - PREPARE_AHEAD for m in moments]
         assert all(r.dates == ("2026-10-22",) and r.clubs == (("Rol", "https://r", "A"),) for r in targeted)
         assert any(not r.dates and r.at == datetime(2026, 10, 15, 0, 1, tzinfo=TZ) for r in runs)
 
     def test_runs_op_zelfde_moment_worden_samengevoegd(self):
         other = {**ROLLING_CLUB, "club_name": "Rol2", "club_url": "https://r2"}
         runs = [r for r in plan_runs({"clubs": [ROLLING_CLUB, other]}, BOOKING, NOW, NOW + timedelta(days=2)) if r.dates]
-        assert len(runs) == 3
+        assert len(runs) == 4
         assert {name for name, _, _ in runs[0].clubs} == {"Rol", "Rol2"}
 
     def test_vrijgave_in_het_verleden_wordt_niet_gepland(self):
         # Dag-club: donderdag 22-10 kwam al om 00:00 vandaag vrij; volgende is 29-10 op 21-10 00:00
         runs = [r for r in plan_runs({"clubs": [DAILY_CLUB]}, BOOKING, NOW, NOW + timedelta(days=8)) if r.dates]
-        assert [(r.at.date(), r.dates) for r in runs] == [(date(2026, 10, 21), ("2026-10-29",))]
+        assert [(r.release_at, r.dates) for r in runs] == [(datetime(2026, 10, 21, 0, 0, tzinfo=TZ), ("2026-10-29",))]
 
     def test_doeldag_die_later_binnen_bereik_komt_wordt_gepland(self):
         # weeks_ahead=1: nu valt alleen 15-10 binnen bereik. Vanaf do 15-10 19:30 is dat 22-10,
@@ -88,8 +91,14 @@ class TestPlannedRun:
         run = PlannedRun(NOW, ("2026-10-22",), (("Rol", "https://r", "A"),))
         assert run.target() == {"dates": ["2026-10-22"], "clubs": [{"name": "Rol", "url": "https://r", "address": "A"}]}
 
+    def test_target_bevat_vrijgavemoment(self):
+        run = PlannedRun(NOW - PREPARE_AHEAD, ("2026-10-22",), (("Rol", "https://r", "A"),), release_at=NOW)
+        assert run.target()["release_at"] == "2026-10-14T12:00:00+02:00"
+        assert run.moment == NOW
+
     def test_volledige_run_heeft_geen_target(self):
         assert PlannedRun(NOW).target() is None
+        assert PlannedRun(NOW).moment == NOW
 
 
 class TestNextNightly:
@@ -124,6 +133,31 @@ class TestNextDue:
         assert covered == [self.TARGETED, self.OTHER]
         assert run.dates == ("2026-10-22", "2026-10-29")
         assert {name for name, _, _ in run.clubs} == {"Rol", "Dag"}
+
+    def test_samengevoegde_run_ververst_vanaf_eerste_vrijgave(self):
+        first = replace(self.TARGETED, release_at=NOW + PREPARE_AHEAD)
+        second = replace(self.OTHER, release_at=NOW + timedelta(minutes=1) + PREPARE_AHEAD)
+        run, _ = next_due([first, second], NOW + timedelta(minutes=6))
+        assert run.release_at == first.release_at
+        assert run.reason.startswith("ingehaald (12:02, 12:03)")  # vrijgavemomenten, niet de starttijden
+
+
+class TestExecute:
+    def _retries(self, monkeypatch, run):
+        waits = []
+        monkeypatch.setattr(scheduler, "run_booking", lambda run, debug: 1)
+        monkeypatch.setattr(scheduler, "_sleep_until", waits.append)
+        scheduler.execute(run, {}, debug=False)
+        return waits
+
+    def test_retry_telt_vanaf_vrijgavemoment(self, monkeypatch):
+        run = PlannedRun(NOW - PREPARE_AHEAD, ("2026-10-22",), (("Rol", "https://r", "A"),), release_at=NOW)
+        assert self._retries(monkeypatch, run) == [NOW + d for d in scheduler.RETRY_DELAYS]
+
+    def test_retry_van_ingehaalde_run_telt_vanaf_inhaalstart(self, monkeypatch):
+        later = NOW + timedelta(minutes=20)
+        run = PlannedRun(later, ("2026-10-22",), (("Rol", "https://r", "A"),), release_at=NOW)
+        assert self._retries(monkeypatch, run) == [later + d for d in scheduler.RETRY_DELAYS]
 
 
 class _StopLoop(Exception):
@@ -160,7 +194,7 @@ class TestRunForever:
         return executed
 
     def test_nachtrun_wordt_ingehaald_na_gerichte_run_met_retries(self, monkeypatch):
-        # Dag-club geeft donderdag 22-10 vrij op 14-10 00:00. De gerichte run van 00:00:05 duurt
+        # Dag-club geeft donderdag 22-10 vrij op 14-10 00:00. De gerichte run (start 23:58) duurt
         # met retries ~6 min; vroeger viel de nachtrun van 00:01 daardoor stil weg.
         executed = self._simulate(
             monkeypatch,
@@ -173,7 +207,7 @@ class TestRunForever:
         assert reasons[1].startswith("vrijgave Dag")
         assert reasons[2] == "nachtelijke volledige run"
         started, nightly = executed[2]
-        assert started == datetime(2026, 10, 14, 0, 6, 5, tzinfo=TZ)
+        assert started == datetime(2026, 10, 14, 0, 4, tzinfo=TZ)  # gerichte run startte 23:58
         assert nightly.at == started  # retries/logging tellen vanaf het inhaalmoment
         assert len(executed) == 3
 

@@ -305,7 +305,8 @@ def build_provider_request(
     Stel het request samen dat naar een provider subprocess gestuurd wordt.
 
     `target` (gerichte run door scheduler.py) beperkt de zoektocht tot
-    {"dates": ["YYYY-MM-DD", ...], "clubs": [{"name", "url", "address"}, ...]}.
+    {"dates": ["YYYY-MM-DD", ...], "clubs": [{"name", "url", "address"}, ...]}, met optioneel
+    "release_at" (ISO): de provider staat dan vóór dat moment klaar en ververst vanaf het moment.
     """
     request = {
         "booking_request": {
@@ -326,6 +327,8 @@ def build_provider_request(
     if target:
         request["booking_request"]["only_dates"] = list(target.get("dates", []))
         request["booking_request"]["clubs"] = list(target.get("clubs", []))
+        if target.get("release_at"):
+            request["booking_request"]["release_at"] = target["release_at"]
     return request
 
 

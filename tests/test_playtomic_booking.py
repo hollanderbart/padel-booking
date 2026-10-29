@@ -243,15 +243,15 @@ class TestFindSlot:
         result = booker._find_slot(club, datetime(2026, 4, 10))
         assert result is not None
 
-    def test_slot_precies_op_einde_venster_wordt_overgeslagen(self):
+    def test_slot_precies_op_einde_venster_wordt_geboekt(self):
         booker = _make_booker(_make_request(time_start="19:30", time_end="21:00", duration=90))
         club = _make_club()
-        # 21:00 is het einde — niet inclusief
+        # time_end is de laatste starttijd (inclusief)
         availability = _make_availability(start_time="21:00:00", duration=90)
         booker._client.get_availability.return_value = availability
 
         result = booker._find_slot(club, datetime(2026, 4, 10))
-        assert result is None
+        assert result is not None
 
     def test_leeg_start_time_wordt_overgeslagen(self):
         booker = _make_booker(_make_request(time_start="19:30", time_end="21:00", duration=90))

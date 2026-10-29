@@ -113,9 +113,22 @@ class TestInferDate:
     def test_jaarwisseling(self):
         assert _infer_date(8, 1, date(2026, 12, 20)) == date(2027, 1, 8)
 
+    def test_net_verstreken_blijft_dit_jaar(self):
+        # 'Aankomend' toonde op 23 okt nog de reservering van 22 okt — dat is niet 2027
+        assert _infer_date(22, 10, date(2026, 10, 23)) == date(2026, 10, 22)
+
+    def test_verstreken_rond_jaarwisseling(self):
+        assert _infer_date(30, 12, date(2027, 1, 2)) == date(2026, 12, 30)
+
+    def test_29_februari(self):
+        assert _infer_date(29, 2, date(2027, 12, 1)) == date(2028, 2, 29)
+
 
 class TestParseOrderCard:
     TODAY = date(2026, 10, 14)
+
+    def test_verstreken_reservering_wordt_overgeslagen(self):
+        assert _parse_order_card(_order_card(), date(2026, 10, 23)) is None
 
     def test_betaalde_reservering(self):
         booking = _parse_order_card(_order_card(), self.TODAY)

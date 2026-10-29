@@ -175,7 +175,7 @@ class PlaytomicBooker:
             except ValueError:
                 continue
             logger.debug("Slot %s, duur=%s min", start_time, slot.get("duration", 0))
-            if window_start <= slot_minutes < window_end and slot.get("duration", 0) == duration:
+            if window_start <= slot_minutes <= window_end and slot.get("duration", 0) == duration:
                 return start_time
         return None
 

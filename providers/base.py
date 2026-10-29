@@ -65,6 +65,11 @@ def hhmm_to_minutes(value: str) -> int:
     return int(hours) * 60 + int(minutes)
 
 
+def in_time_window(start_minutes: int, booking_cfg: dict) -> bool:
+    """Valt een starttijd binnen het venster? `time_end` is de laatste starttijd (inclusief)."""
+    return hhmm_to_minutes(booking_cfg["time_start"]) <= start_minutes <= hhmm_to_minutes(booking_cfg["time_end"])
+
+
 def booking_days(booking_cfg: dict) -> list[str]:
     """
     Weekdagen uit de booking-config: `days` (lijst) of het oude `day` (één dag).

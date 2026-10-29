@@ -351,6 +351,12 @@ class TestTargetedRun:
     def test_zonder_target_geen_beperking(self):
         req = build_provider_request(self.CONFIG, {}, {}, dry_run=False)
         assert "only_dates" not in req["booking_request"]
+        assert "release_at" not in req["booking_request"]
+
+    def test_vrijgavemoment_gaat_mee_naar_provider(self):
+        target = {**self.TARGET, "release_at": "2026-10-15T20:00:00+02:00"}
+        req = build_provider_request(self.CONFIG, {}, {}, dry_run=False, target=target)
+        assert req["booking_request"]["release_at"] == "2026-10-15T20:00:00+02:00"
 
     def test_meerdere_dagen_in_request(self):
         config = {**self.CONFIG, "booking": {**self.CONFIG["booking"], "days": ["tuesday", "thursday"]}}

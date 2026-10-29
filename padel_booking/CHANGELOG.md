@@ -1,3 +1,9 @@
+## 2.9.0
+
+- Sneller op het vrijgavemoment (`schedule_mode: smart`): een gerichte run start nu 2 minuten vóór de vrijgave. In die tijd logt hij in en opent hij elke clubdag in een eigen tabblad; vanaf het moment ververst hij elke ~2 seconden, 90 seconden lang (Livewire `$refresh`, zonder herladen). Voorheen startte de run 5 s na het moment en keek hij pas na 30–65 s (browser starten, opnieuw inloggen omdat de sessie dan altijd verlopen was, pagina laden). In die tijd waren de avondslots bij bijv. Hal 0172 al weg. De retries na 1 en 5 minuten zijn vervangen door het verversen plus één poging na 5 minuten. In de log: `Klaar voor vrijgave om …` en `Slot gezien bij <club>, +N s na vrijgave`
+- `booking_time_end` is nu inclusief, zoals de README al beschreef ("laatste starttijd"): met 20:00–21:00 telt een slot van 21:00 ook mee. Rollende clubs krijgen daardoor ook een run op `booking_time_end`. Geldt voor Meet & Play en Playtomic
+- Fix: een net verstreken reservering die Meet & Play nog onder "Aankomend" toont (bijv. 22 okt op 23 okt), kreeg het jaar erna (`2027-10-22`). Het jaar is nu het voorkomen dat het dichtst bij vandaag ligt, en verstreken reserveringen komen niet meer in `future_bookings.json`
+
 ## 2.8.1
 
 - Fix (Meet & Play): was de site onbereikbaar (bijv. `net::ERR_CONNECTION_REFUSED` tijdens een storing), dan meldde de addon "Automatisch inloggen mislukt. Controleer KNLTB_EMAIL/KNLTB_PASSWORD" en overschreef `debug_login_failed.png` met Chromiums foutpagina. Nu staat er `Meet & Play niet bereikbaar (net::ERR_…) — storing of netwerkprobleem, geen inlogprobleem`, zonder traceback, en blijft de screenshot van de laatste echte inlogfout bewaard

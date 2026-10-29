@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from providers.meetandplay.booking import MeetAndPlayBooker, PendingReservationError
+from providers.meetandplay.booking import RELEASE_POLL, MeetAndPlayBooker, PendingReservationError
 from providers.base import ProviderResult
 
 
@@ -347,15 +347,15 @@ class TestFindTimeslotFilters:
         result = booker._find_timeslot(page, club)
         assert result is None
 
-    def test_slot_precies_op_eindtijd_wordt_overgeslagen(self):
-        # 21:00 is exclusief
+    def test_slot_precies_op_eindtijd_wordt_geboekt(self):
+        # time_end is de laatste starttijd (inclusief)
         booker = _make_booker(_make_request(time_start="19:30", time_end="21:00", duration=90))
         slot = self._make_slot_mock(time_text="21:00\n90 min")
         page = self._make_page_with_slots([slot])
         club = {"name": "TestClub", "url": "https://example.com", "address": "Straat 1"}
 
         result = booker._find_timeslot(page, club)
-        assert result is None
+        assert result is not None
 
     def test_verkeerde_duur_wordt_overgeslagen(self):
         booker = _make_booker(_make_request(time_start="19:30", time_end="21:00", duration=90))
@@ -818,6 +818,141 @@ class TestGerichteRun:
 
         search.assert_not_called()
         assert find.call_args[0][1]["name"] == "Club A"
+
+
+class TestBookAtRelease:
+    """Gerichte run op een vrijgavemoment: vooraf klaarzetten, daarna verversen tot er een slot is."""
+
+    CLUB = {"name": "Hal", "url": "https://meetandplay.nl/club/1", "address": "Weg 1"}
+    DATE = datetime(2026, 10, 29)
+    SLOT = {"slot_id": "s1", "club_name": "Hal", "club_address": "Weg 1", "court_name": "Baan 1", "time_range": "20:00"}
+
+    @pytest.fixture
+    def clock(self, monkeypatch):
+        """Nepklok: `sleep` schuift de tijd op; begint 60 s vóór de vrijgave."""
+        from datetime import timedelta
+        from zoneinfo import ZoneInfo
+
+        import providers.meetandplay.booking as booking_mod
+
+        release = datetime(2026, 10, 15, 20, 0, tzinfo=ZoneInfo("Europe/Amsterdam"))
+        state = {"now": release - timedelta(seconds=60), "sleeps": []}
+
+        class FakeDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return state["now"]
+
+        def fake_sleep(seconds):
+            state["sleeps"].append(seconds)
+            state["now"] += timedelta(seconds=seconds)
+
+        monkeypatch.setattr(booking_mod, "datetime", FakeDatetime)
+        monkeypatch.setattr(booking_mod.time_mod, "sleep", fake_sleep)
+        state["release"] = release
+        return state
+
+    def _booker(self, picks, component_id="lw1"):
+        booker = _make_booker()
+        booker._context = MagicMock()
+        booker._open_club_day = MagicMock()
+        booker._livewire_date_id = MagicMock(return_value=component_id)
+        booker._refresh_livewire = MagicMock()
+        booker._pick_slot = MagicMock(side_effect=picks)
+        booker._book_found_slot = MagicMock(
+            return_value=ProviderResult(success=True, provider="meetandplay", booked_date="2026-10-29"))
+        return booker
+
+    def test_wacht_tot_vlak_voor_vrijgave_en_boekt_zodra_slot_verschijnt(self, clock):
+        booker = self._booker([None, None, dict(self.SLOT)])
+        page = MagicMock()
+
+        result = booker._book_at_release(page, [self.DATE], [self.CLUB], clock["release"])
+
+        assert result.success
+        booker._open_club_day.assert_called_once_with(page, self.CLUB, self.DATE)
+        assert clock["sleeps"][0] == 57  # tot RELEASE_LEAD (3 s) vóór het moment
+        assert booker._refresh_livewire.call_count == 3
+        booker._book_found_slot.assert_called_once_with(page, self.CLUB, self.DATE, self.SLOT)
+
+    def test_geen_slot_stopt_na_pollvenster(self, clock):
+        booker = self._booker(lambda page, club, verbose: None)
+
+        result = booker._book_at_release(MagicMock(), [self.DATE], [self.CLUB], clock["release"])
+
+        assert not result.success
+        assert clock["now"] >= clock["release"] + RELEASE_POLL
+        verbose = [c.kwargs["verbose"] for c in booker._pick_slot.call_args_list]
+        assert verbose[0] and verbose[-1] and not any(verbose[1:-1])  # alleen eerste en laatste ronde info
+        booker._book_found_slot.assert_not_called()
+
+    def test_vrijgave_al_voorbij_een_ronde_zonder_wachten(self, clock):
+        clock["now"] = clock["release"] + RELEASE_POLL
+        booker = self._booker([None])
+
+        result = booker._book_at_release(MagicMock(), [self.DATE], [self.CLUB], clock["release"])
+
+        assert not result.success
+        assert booker._refresh_livewire.call_count == 1
+        assert clock["sleeps"] == []
+
+    def test_elke_clubdag_een_eigen_tabblad(self, clock):
+        other = {**self.CLUB, "name": "Lake", "url": "https://meetandplay.nl/club/2"}
+        booker = self._booker([None, dict(self.SLOT, club_name="Lake")])
+        page = MagicMock()
+
+        booker._book_at_release(page, [self.DATE], [self.CLUB, other], clock["release"])
+
+        tabs = [c.args[0] for c in booker._open_club_day.call_args_list]
+        assert tabs[0] is page and tabs[1] is booker._context.new_page.return_value
+        assert booker._book_found_slot.call_args.args[1] == other
+
+    def test_zonder_livewire_component_gewone_zoektocht(self, clock):
+        booker = self._booker([None], component_id=None)
+        booker._try_dates_and_clubs = MagicMock(return_value=ProviderResult(success=False, provider="meetandplay"))
+
+        booker._book_at_release(MagicMock(), [self.DATE], [self.CLUB], clock["release"])
+
+        booker._try_dates_and_clubs.assert_called_once()
+        booker._refresh_livewire.assert_not_called()
+
+    def test_mislukte_verversing_laat_tabblad_vallen(self, clock):
+        booker = self._booker([None])
+        booker._refresh_livewire.side_effect = Exception("Target closed")
+
+        result = booker._book_at_release(MagicMock(), [self.DATE], [self.CLUB], clock["release"])
+
+        assert not result.success
+        assert booker._refresh_livewire.call_count == 1
+
+    def test_mislukte_boeking_opent_dag_opnieuw_en_ververst_verder(self, clock):
+        booker = self._booker([dict(self.SLOT), dict(self.SLOT)])
+        booker._book_found_slot.side_effect = [
+            None, ProviderResult(success=True, provider="meetandplay", booked_date="2026-10-29")]
+
+        result = booker._book_at_release(MagicMock(), [self.DATE], [self.CLUB], clock["release"])
+
+        assert result.success
+        assert booker._open_club_day.call_count == 2
+
+    def test_run_gebruikt_vrijgaveflow_bij_release_at(self):
+        req = _make_request(weeks_ahead=1)
+        req["booking_request"]["clubs"] = [self.CLUB]
+        req["booking_request"]["only_dates"] = ["2026-10-29"]
+        req["booking_request"]["release_at"] = "2026-10-15T20:00:00+02:00"
+        booker = _make_booker(req)
+        mock_pw = MagicMock()
+        mock_pw.__enter__ = MagicMock(return_value=mock_pw)
+        mock_pw.__exit__ = MagicMock(return_value=False)
+        booker.session_manager.is_logged_in.return_value = True
+
+        with patch("providers.meetandplay.booking.sync_playwright", return_value=mock_pw), \
+             patch.object(booker, "_within_radius", side_effect=lambda clubs, **kw: clubs), \
+             patch.object(booker, "_book_at_release",
+                          return_value=ProviderResult(success=False, provider="meetandplay")) as release:
+            booker.run()
+
+        assert release.call_args.args[3].isoformat() == "2026-10-15T20:00:00+02:00"
 
 
 class TestDistanceOption:
