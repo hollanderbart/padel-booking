@@ -179,7 +179,10 @@ class TestGetUpcomingBookingDates:
     def test_eerst_volgende_datum_ligt_in_de_toekomst(self):
         booker = _make_booker(_make_request(day="thursday"))
         dates = booker._get_upcoming_booking_dates(count=1)
-        assert dates[0] > datetime.now()
+        # Op de boekingsdag zelf vóór time_start (19:30) is vandaag de eerste datum; de datum draagt dan
+        # het huidige tijdstip, dus vergelijk het slot (datum + time_start), niet de datum zelf
+        slot = dates[0].replace(hour=19, minute=30, second=0, microsecond=0)
+        assert slot > datetime.now()
 
     def test_nederlandse_dagnaam_werkt(self):
         booker = _make_booker(_make_request(day="donderdag"))

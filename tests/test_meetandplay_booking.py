@@ -74,7 +74,10 @@ class TestGetUpcomingBookingDates:
     def test_eerste_datum_in_de_toekomst(self):
         booker = _make_booker()
         dates = booker._get_upcoming_booking_dates(count=1)
-        assert dates[0] > datetime.now()
+        # Op de boekingsdag zelf vóór time_start (19:30) is vandaag de eerste datum; de datum draagt dan
+        # het huidige tijdstip, dus vergelijk het slot (datum + time_start), niet de datum zelf
+        slot = dates[0].replace(hour=19, minute=30, second=0, microsecond=0)
+        assert slot > datetime.now()
 
     def test_ongeldige_dag_gooit_valueerror(self):
         booker = _make_booker()
