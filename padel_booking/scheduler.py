@@ -16,6 +16,7 @@ Gebruik:
   python scheduler.py                              # draait continu (schedule_mode: smart)
   python scheduler.py --plan                       # toon de geplande runs voor 7 dagen en stop
   python scheduler.py --plan --schedule-file x.json
+  python scheduler.py --remind                     # wacht op openstaande betaalherinneringen en stop (nightly)
 """
 
 import argparse
@@ -31,7 +32,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from orchestrator import load_config, setup_logging
+from orchestrator import load_config, next_reminder_at, remind_unpaid, setup_logging
 from providers.base import booking_days, hhmm_to_minutes, upcoming_booking_dates
 from providers.meetandplay.coords import club_distance_km, club_slug, coords_file, load_club_coords
 
@@ -53,6 +54,7 @@ RETRY_DELAYS = (timedelta(minutes=5),)     # na het vrijgavemoment; de eerste ru
 SLOT_STEP_MIN = 30                         # Meet & Play starttijden liggen op een half-uur-raster
 MAX_SLEEP = 60                             # seconden; korte slaapstappen vangen klokwijzigingen op
 LATE_AFTER = timedelta(minutes=2)          # later gestart = ingehaald: gelogd, retries tellen vanaf nu
+REMINDER_GUARD = timedelta(minutes=3)      # geen betaalherinnering (≈1 min) vlak voor een geplande run
 
 ROLLING = "rollend"
 DAILY = "dagelijks"
@@ -285,6 +287,27 @@ def execute(run: PlannedRun, config: dict, debug: bool) -> None:
             code = run_booking(run, debug)
 
 
+def _pending_file(config: dict) -> Path:
+    return Path(config.get("state", {}).get("pending_payments_file", "pending_payments.json"))
+
+
+def send_due_reminders(config: dict) -> None:
+    """Betaalherinneringen die aan de beurt zijn: eerst je reserveringen ophalen, dan herinneren."""
+    try:
+        remind_unpaid(config, lambda: run_fetch_bookings(config))
+    except Exception:  # noqa: BLE001 — de planner moet blijven draaien
+        # Onleesbare herinneringen weggooien, anders blijven ze aan de beurt
+        logger.exception("Betaalherinnering mislukt — openstaande herinneringen gewist")
+        _pending_file(config).unlink(missing_ok=True)
+
+
+def remind_pending(config: dict) -> None:
+    """Nightly-modus: wacht tot alle openstaande betaalherinneringen verstuurd zijn."""
+    while (remind_at := next_reminder_at(_pending_file(config))) is not None:
+        _sleep_until(remind_at)
+        send_due_reminders(config)
+
+
 def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug: bool) -> None:
     url = schedule_cfg.get("url", DEFAULT_SCHEDULE_URL)
     cache_file = Path(schedule_cfg.get("cache_file", DEFAULT_CACHE_FILE))
@@ -298,6 +321,7 @@ def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug
     # run nog bezig is daarna alsnog gedaan worden in plaats van stil te verdwijnen.
     checked_until = datetime.now(TZ)
     done: set[datetime] = set()
+    reminded: datetime | None = None       # laatst geprobeerde herinnertijd: hooguit één poging per tijd
 
     # Zelfde gedrag als vroeger bij het starten van de addon: direct één volledige run
     execute(PlannedRun(checked_until, reason="startrun"), config, debug)
@@ -315,6 +339,12 @@ def run_forever(config: dict, schedule_cfg: dict, local_file: Path | None, debug
         if run is None:
             checked_until = now
             done = {at for at in done if at > checked_until}
+            remind_at = next_reminder_at(_pending_file(config))
+            if (remind_at and remind_at <= now and remind_at != reminded
+                    and not (planned and planned[0].at - now < REMINDER_GUARD)):
+                reminded = remind_at
+                send_due_reminders(config)
+                continue
             wait = (planned[0].at - now).total_seconds() if planned else MAX_SLEEP
             time_mod.sleep(min(MAX_SLEEP, wait))
             continue
@@ -344,12 +374,16 @@ def main() -> None:
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--schedule-file", type=Path, default=None, help="Lokaal club_schedule.json i.p.v. de URL")
     parser.add_argument("--plan", action="store_true", help="Toon de geplande runs voor 7 dagen en stop")
+    parser.add_argument("--remind", action="store_true", help="Wacht op openstaande betaalherinneringen en stop")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
     setup_logging(args.debug)
 
     config = load_config(args.config)
     schedule_cfg = config.get("schedule", {})
+    if args.remind:
+        remind_pending(config)
+        return
     if args.plan:
         schedule = load_nearby_schedule(config, schedule_cfg.get("url", DEFAULT_SCHEDULE_URL),
                                         Path(schedule_cfg.get("cache_file", DEFAULT_CACHE_FILE)), args.schedule_file)

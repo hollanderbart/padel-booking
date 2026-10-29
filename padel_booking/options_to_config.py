@@ -60,6 +60,7 @@ config = {
         "booking_state_file": "/config/padel/.booking_state.json",
         "history_file": "/config/padel/booking_history.json",
         "last_run_file": "/config/padel/last_run.json",
+        "pending_payments_file": "/config/padel/pending_payments.json",
     },
 }
 

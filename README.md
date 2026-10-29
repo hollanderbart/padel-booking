@@ -97,7 +97,8 @@ INFO  Automatisch inloggen gelukt!
 INFO  8 club(s) gevonden na filteren
 INFO  Tijdslot gevonden: Sportcentrum Boskoop om 19:30 (baan: Padelbaan 1)
 INFO  Winkelwagen bereikt
-INFO  HA push notificatie verzonden: Padelbaan beschikbaar!
+INFO  Herinnering gepland om 20:08 als Sportcentrum Boskoop op 2026-11-12 niet betaald is
+INFO  HA push notificatie verzonden: Betaal vóór 20:15: Sportcentrum Boskoop, do 12-11 19:30
 ```
 
 ### Stap 5 — Automatisering instellen
@@ -344,10 +345,32 @@ python scheduler.py --plan --schedule-file club_schedule.json
 
 ## Push notificaties
 
-Bij een beschikbaar slot ontvang je een push notificatie ("Padelbaan beschikbaar!") met:
-- Baannaam en exacte tijdstip
-- Clubnaam en adres
-- Een directe link naar de clubpagina om zelf te boeken (tik op de notificatie om te openen)
+Bij een gereserveerd slot ontvang je een push notificatie met de betaallink (tik op de notificatie om te betalen):
+
+```
+Betaal vóór 20:15: Hal 0172, do 12-11 20:00
+via meetandplay
+Padelbaan 1 — 20:00 - 21:30 90 minuten
+Hal 0172 — Nieuwveenseweg 39A, Nieuwkoop
+
+Tik om te betalen. Niet betaald binnen 15 minuten = reservering vervalt.
+```
+
+**Je hebt 15 minuten.** Meet & Play betaalt via iDEAL (Mollie). Een iDEAL-betaling verloopt na
+15 minuten ([Mollie](https://docs.mollie.com/docs/handling-payment-status)), en daarna annuleert Meet & Play
+de reservering (`Geannuleerd` onder "Aankomend"). Die termijn kan niet verlengd worden: hij hoort bij de
+betaalmethode, niet bij de addon of de club. Een onbetaalde reservering staat trouwens niet onder
+"Aankomend" zolang hij openstaat, alleen als hij betaald of geannuleerd is.
+
+- **Time-sensitive**: betaalmeldingen hebben `interruption-level: time-sensitive`. Op iOS komen ze daardoor door
+  Focus en Slaap heen en blijven ze op het toegangsscherm staan. Zet daarvoor op je iPhone **Instellingen →
+  Meldingen → Home Assistant → Tijdgevoelige meldingen** aan.
+- **Herinnering na 8 minuten**: is de reservering dan nog niet betaald (na het opnieuw ophalen van je reserveringen
+  staat de datum niet als `Betaald` in `future_bookings.json`), dan volgt één herinnering: "Nog niet betaald — vóór 20:15:
+  …". Openstaande herinneringen staan in `/config/padel/pending_payments.json`. In `schedule_mode: smart` stuurt de
+  planner ze tussen runs door (niet vlak vóór een geplande run); in `nightly` wacht de addon er na de run op.
+- De deadline staat alleen in de titel bij een Mollie/iDEAL-link. Komt de link op de boekingssite van de club uit,
+  dan is de termijn onbekend en staat er "Padelbaan beschikbaar: …".
 
 Er worden **geen** notificaties gestuurd als er geen baan gevonden wordt.
 
@@ -539,6 +562,18 @@ scp -i ~/.ssh/id_ed25519_ha root@homeassistant.local:/config/padel/debug_payment
 
 - Controleer `ha_notify_device_id` in de Configuration tab
 - Zoek de juiste device ID via **Developer Tools → Actions → `notify.mobile_app`**
+- In de addon-log betekent `HA push notificatie verzonden` dat HA de melding heeft aangenomen; komt hij dan niet
+  aan, dan zit het tussen HA en je telefoon. Test met dezelfde payload als de addon (**Developer Tools → Actions**, YAML):
+  ```yaml
+  action: notify.mobile_app_<device_id>
+  data:
+    title: "Betaal vóór 20:15: Testclub, do 12-11 20:00"
+    message: "Test van de padel booker"
+    data:
+      url: "https://meetandplay.nl/mijn-aankopen"
+      push:
+        interruption-level: time-sensitive
+  ```
 
 ### Logs en status uitlezen via SSH
 

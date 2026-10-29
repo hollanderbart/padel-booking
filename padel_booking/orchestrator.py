@@ -19,19 +19,23 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
 
-from notify import notify_booking_available
+from notify import notify_booking_available, notify_payment_reminder, payment_deadline
 from providers.base import booking_days, upcoming_booking_dates
 
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = "config.yaml"
+# Herinnering voor een onbetaalde reservering: ruim binnen de 15 minuten van een iDEAL-betaling
+REMINDER_AFTER = timedelta(minutes=8)
+PAID_STATUSES = ("betaald", "confirmed")
 # Providers loggen zelf al een timestamp + level; strip die om dubbele prefixes te voorkomen
 PROVIDER_LOG_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+\w+\s+")
 
@@ -154,6 +158,74 @@ def append_booking_history(history_file: Path, booked_date: str, slot_info: dict
             return
     if _write_json(history_file, [entry, *history][:20], "boekingsgeschiedenis"):
         logger.info("Boekingsgeschiedenis bijgewerkt: %s", history_file)
+
+
+def _read_json_list(path: Path) -> list:
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def add_pending_payment(pending_file: Path, booked_date: str, slot_info: dict, provider: str,
+                        sent_at: datetime, deadline: datetime | None) -> None:
+    """Onthoud een verstuurde betaallink, zodat er een herinnering volgt als hij niet betaald wordt."""
+    entry = {
+        "booked_date": booked_date,
+        "provider": provider,
+        "club_name": slot_info.get("club_name", ""),
+        "time_range": slot_info.get("time_range", ""),
+        "payment_url": slot_info.get("payment_url", ""),
+        "sent_at": sent_at.isoformat(timespec="seconds"),
+        "remind_at": (sent_at + REMINDER_AFTER).isoformat(timespec="seconds"),
+        "deadline": deadline.isoformat(timespec="seconds") if deadline else None,
+    }
+    if _write_json(pending_file, [*_read_json_list(pending_file), entry], "openstaande betalingen"):
+        logger.info("Herinnering gepland om %s als %s op %s niet betaald is",
+                    (sent_at + REMINDER_AFTER).strftime("%H:%M"), entry["club_name"], booked_date)
+
+
+def next_reminder_at(pending_file: Path) -> datetime | None:
+    times = [datetime.fromisoformat(p["remind_at"]) for p in _read_json_list(pending_file) if p.get("remind_at")]
+    return min(times, default=None)
+
+
+def load_paid_dates(future_bookings_file: Path) -> set[str]:
+    """Datums met een betaalde reservering in future_bookings.json."""
+    return {
+        b["booked_date"] for b in _read_json_list(future_bookings_file)
+        if b.get("booked_date") and str(b.get("status", "")).lower() in PAID_STATUSES
+    }
+
+
+def remind_unpaid(config: dict, refresh_bookings: Callable[[], None], now: datetime | None = None) -> None:
+    """
+    Stuur een herinnering voor betaallinks waarvan de herinnertijd verstreken is en die nog niet
+    betaald zijn. `refresh_bookings` haalt eerst je reserveringen opnieuw op (fetch_bookings.py).
+    Elke link krijgt hooguit één herinnering.
+    """
+    pending_file = Path(config.get("state", {}).get("pending_payments_file", "pending_payments.json"))
+    pending = _read_json_list(pending_file)
+    now = now or datetime.now().astimezone()
+    due = [p for p in pending if datetime.fromisoformat(p["remind_at"]) <= now]
+    if not due:
+        return
+
+    refresh_bookings()
+    paid = load_paid_dates(Path(config.get("fetch_bookings", {}).get("output_file", "future_bookings.json")))
+    for entry in due:
+        deadline = datetime.fromisoformat(entry["deadline"]) if entry.get("deadline") else None
+        if entry["booked_date"] in paid:
+            logger.info("Reservering %s op %s is betaald — geen herinnering", entry["club_name"], entry["booked_date"])
+        elif deadline and now >= deadline:
+            logger.info("Betaaltermijn voor %s op %s al verlopen — geen herinnering", entry["club_name"], entry["booked_date"])
+        else:
+            logger.info("Reservering %s op %s nog niet betaald — herinnering sturen", entry["club_name"], entry["booked_date"])
+            notify_payment_reminder(entry["club_name"], entry["booked_date"], entry["time_range"],
+                                    entry["payment_url"], deadline)
+    _write_json(pending_file, [p for p in pending if p not in due], "openstaande betalingen")
 
 
 def write_last_run(last_run_file: Path, success: bool, provider: str | None = None) -> None:
@@ -368,22 +440,29 @@ def _print_summary(provider: str, slot_info: dict) -> None:
     print("=" * 60 + "\n")
 
 
-def _handle_success(result: dict, dry_run: bool, state_file: Path, history_file: Path) -> None:
+def _handle_success(result: dict, dry_run: bool, state_file: Path, history_file: Path,
+                    pending_file: Path | None = None) -> None:
     provider = result["provider"]
     booked_date = result["booked_date"]
     slot_info = result["slot_info"]
+    payment_url = slot_info.get("payment_url", "")
+    sent_at = datetime.now().astimezone()
+    deadline = payment_deadline(payment_url, sent_at)
 
     if not dry_run:
         save_booking_state(state_file, booked_date, slot_info, provider)
         append_booking_history(history_file, booked_date, slot_info, provider)
+        if pending_file and payment_url:
+            add_pending_payment(pending_file, booked_date, slot_info, provider, sent_at, deadline)
 
     notify_booking_available(
         slot_info["court_name"],
         slot_info["time_range"],
         f"{slot_info['club_name']} — {slot_info['club_address']}",
-        slot_info.get("payment_url", ""),
+        payment_url,
         booked_date,
         provider,
+        deadline,
     )
     _print_summary(provider, slot_info)
 
@@ -397,6 +476,7 @@ async def main_async(debug: bool, dry_run: bool, target: dict | None = None) -> 
     state_file = Path(state_cfg.get("booking_state_file", state_cfg.get("state_file", ".booking_state.json")))
     history_file = Path(state_cfg.get("history_file", "booking_history.json"))
     last_run_file = Path(state_cfg.get("last_run_file", "last_run.json"))
+    pending_file = Path(state_cfg.get("pending_payments_file", "pending_payments.json"))
 
     logger.info("=" * 60)
     logger.info("Padel Booking Orchestrator gestart")
@@ -437,7 +517,7 @@ async def main_async(debug: bool, dry_run: bool, target: dict | None = None) -> 
         result = await run_all_providers(provider_requests, debug=debug)
         if not (result and result.get("success")):
             break
-        _handle_success(result, dry_run, state_file, history_file)
+        _handle_success(result, dry_run, state_file, history_file, pending_file)
         winners.append(result["provider"])
         skip_dates.add(result["booked_date"])
         remaining = [d for d in remaining if d != result["booked_date"]]

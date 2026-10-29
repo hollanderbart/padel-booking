@@ -1,3 +1,8 @@
+## 2.10.0
+
+- Betaalmelding valt meer op: de titel noemt de deadline en het slot (`Betaal vóór 20:15: Hal 0172, do 12-11 20:00`), en de melding is *time-sensitive*, zodat hij op iOS door Focus/Slaap heen komt en op het toegangsscherm blijft (zet Tijdgevoelige meldingen aan voor de Home Assistant-app). De deadline is 15 minuten na versturen: Meet & Play betaalt via iDEAL (Mollie), een iDEAL-betaling verloopt na 15 minuten, en daarna annuleert Meet & Play de reservering. Die termijn kan niet verlengd worden
+- Herinnering: 8 minuten na een betaallink haalt de addon je reserveringen opnieuw op. Staat de datum dan niet als `Betaald`, dan volgt één herinnering (`Nog niet betaald — vóór 20:15: …`). Openstaande herinneringen staan in `/config/padel/pending_payments.json`. In `smart` stuurt de planner ze tussen runs door, in `nightly` wacht de addon er na de run op (`scheduler.py --remind`)
+
 ## 2.9.0
 
 - Sneller op het vrijgavemoment (`schedule_mode: smart`): een gerichte run start nu 2 minuten vóór de vrijgave. In die tijd logt hij in en opent hij elke clubdag in een eigen tabblad; vanaf het moment ververst hij elke ~2 seconden, 90 seconden lang (Livewire `$refresh`, zonder herladen). Voorheen startte de run 5 s na het moment en keek hij pas na 30–65 s (browser starten, opnieuw inloggen omdat de sessie dan altijd verlopen was, pagina laden). In die tijd waren de avondslots bij bijv. Hal 0172 al weg. De retries na 1 en 5 minuten zijn vervangen door het verversen plus één poging na 5 minuten. In de log: `Klaar voor vrijgave om …` en `Slot gezien bij <club>, +N s na vrijgave`

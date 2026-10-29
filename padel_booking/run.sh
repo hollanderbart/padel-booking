@@ -43,3 +43,6 @@ fi
 
 # Exit code 1 betekent "geen boeking gemaakt" en mag het script niet afbreken.
 python orchestrator.py --debug || echo "Geen boeking gemaakt (exit $?)"
+
+# Betaallink verstuurd? Wacht op de herinnering (na 8 min, alleen als hij nog niet betaald is).
+python scheduler.py --remind || true

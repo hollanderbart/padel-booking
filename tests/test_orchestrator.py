@@ -4,7 +4,7 @@ Unit tests voor orchestrator.py — geen browser of credentials nodig.
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -385,6 +385,7 @@ class TestMainAsync:
             "booking_state_file": str(tmp_path / "state.json"),
             "history_file": str(tmp_path / "history.json"),
             "last_run_file": str(tmp_path / "last_run.json"),
+            "pending_payments_file": str(tmp_path / "pending.json"),
         }
         config["fetch_bookings"] = {"skip_booked_dates": True, "output_file": str(tmp_path / "future.json")}
         monkeypatch.setattr(orchestrator, "load_config", lambda: config)
@@ -439,3 +440,96 @@ class TestMainAsync:
         monkeypatch.setattr(orchestrator, "run_all_providers", self._provider_that_books_first_open_date(seen))
         assert await main_async(debug=False, dry_run=False) == 0
         assert seen == [[], ["2026-10-15"]]
+
+
+# ---------------------------------------------------------------------------
+# Betaalherinneringen
+# ---------------------------------------------------------------------------
+
+class TestBetaalherinnering:
+    SENT = datetime.fromisoformat("2026-10-29T20:00:04+01:00")
+    SLOT = {"club_name": "Hal 0172", "club_address": "Weg 1", "court_name": "Baan 1",
+            "time_range": "20:00 - 21:30", "payment_url": "https://www.mollie.com/checkout/select-method/x"}
+
+    def _config(self, tmp_path):
+        return {
+            "state": {"pending_payments_file": str(tmp_path / "pending.json")},
+            "fetch_bookings": {"output_file": str(tmp_path / "future.json")},
+        }
+
+    def _add(self, tmp_path, booked_date="2026-11-12"):
+        orchestrator.add_pending_payment(tmp_path / "pending.json", booked_date, self.SLOT, "meetandplay",
+                                         self.SENT, self.SENT + timedelta(minutes=15))
+
+    def _remind(self, tmp_path, monkeypatch, now, future=None):
+        sent, refreshed = [], []
+        monkeypatch.setattr(orchestrator, "notify_payment_reminder", lambda *a: sent.append(a))
+
+        def refresh():
+            refreshed.append(True)
+            if future is not None:
+                (tmp_path / "future.json").write_text(json.dumps(future))
+
+        orchestrator.remind_unpaid(self._config(tmp_path), refresh, now=now)
+        return sent, refreshed
+
+    def test_herinnering_8_minuten_na_versturen(self, tmp_path):
+        self._add(tmp_path)
+        assert orchestrator.next_reminder_at(tmp_path / "pending.json") == self.SENT + timedelta(minutes=8)
+
+    def test_nog_niet_aan_de_beurt_haalt_niets_op(self, tmp_path, monkeypatch):
+        self._add(tmp_path)
+        sent, refreshed = self._remind(tmp_path, monkeypatch, self.SENT + timedelta(minutes=5))
+        assert not sent and not refreshed
+        assert orchestrator.next_reminder_at(tmp_path / "pending.json") is not None
+
+    def test_onbetaald_krijgt_een_herinnering(self, tmp_path, monkeypatch):
+        self._add(tmp_path)
+        sent, refreshed = self._remind(tmp_path, monkeypatch, self.SENT + timedelta(minutes=8), future=[])
+        assert refreshed and len(sent) == 1
+        club, booked_date, _, url, deadline = sent[0]
+        assert (club, booked_date, url) == ("Hal 0172", "2026-11-12", self.SLOT["payment_url"])
+        assert deadline == self.SENT + timedelta(minutes=15)
+        assert orchestrator.next_reminder_at(tmp_path / "pending.json") is None  # maar één keer
+
+    def test_betaald_geen_herinnering(self, tmp_path, monkeypatch):
+        self._add(tmp_path)
+        future = [{"booked_date": "2026-11-12", "status": "betaald"}]
+        sent, _ = self._remind(tmp_path, monkeypatch, self.SENT + timedelta(minutes=8), future=future)
+        assert not sent
+
+    def test_andere_status_telt_niet_als_betaald(self, tmp_path, monkeypatch):
+        self._add(tmp_path)
+        future = [{"booked_date": "2026-11-12", "status": "openstaand"}]
+        sent, _ = self._remind(tmp_path, monkeypatch, self.SENT + timedelta(minutes=8), future=future)
+        assert len(sent) == 1
+
+    def test_verlopen_termijn_geen_herinnering(self, tmp_path, monkeypatch):
+        self._add(tmp_path)
+        sent, _ = self._remind(tmp_path, monkeypatch, self.SENT + timedelta(minutes=20), future=[])
+        assert not sent
+        assert orchestrator.next_reminder_at(tmp_path / "pending.json") is None
+
+    def test_alleen_verlopen_herinneringen_worden_verwerkt(self, tmp_path, monkeypatch):
+        self._add(tmp_path, "2026-11-12")
+        later = dict(self.SLOT)
+        orchestrator.add_pending_payment(tmp_path / "pending.json", "2026-11-19", later, "meetandplay",
+                                         self.SENT + timedelta(minutes=30), None)
+        sent, _ = self._remind(tmp_path, monkeypatch, self.SENT + timedelta(minutes=8), future=[])
+        assert [a[1] for a in sent] == ["2026-11-12"]
+        assert orchestrator.next_reminder_at(tmp_path / "pending.json") == self.SENT + timedelta(minutes=38)
+
+    def test_handle_success_plant_herinnering_en_stuurt_deadline(self, tmp_path, monkeypatch):
+        calls = []
+        monkeypatch.setattr(orchestrator, "notify_booking_available", lambda *a: calls.append(a))
+        result = {"provider": "meetandplay", "booked_date": "2026-11-12", "slot_info": dict(self.SLOT)}
+        orchestrator._handle_success(result, False, tmp_path / "s.json", tmp_path / "h.json", tmp_path / "pending.json")
+        pending = json.loads((tmp_path / "pending.json").read_text())
+        assert len(pending) == 1 and pending[0]["deadline"]
+        assert calls[0][-1] is not None  # deadline voor een Mollie-link
+
+    def test_dry_run_plant_geen_herinnering(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(orchestrator, "notify_booking_available", lambda *a: None)
+        result = {"provider": "meetandplay", "booked_date": "2026-11-12", "slot_info": dict(self.SLOT)}
+        orchestrator._handle_success(result, True, tmp_path / "s.json", tmp_path / "h.json", tmp_path / "pending.json")
+        assert not (tmp_path / "pending.json").exists()

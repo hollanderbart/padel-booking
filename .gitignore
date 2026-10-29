@@ -38,6 +38,7 @@ ENV/
 booking_history.json*
 future_bookings.json
 last_run.json
+pending_payments.json
 /club_schedule.json
 debug_*.png
 debug_*.html

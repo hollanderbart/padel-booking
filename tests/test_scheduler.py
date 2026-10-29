@@ -165,8 +165,10 @@ class _StopLoop(Exception):
 
 
 class TestRunForever:
-    def _simulate(self, monkeypatch, start: datetime, until: datetime, durations: dict[str, timedelta]):
+    def _simulate(self, monkeypatch, start: datetime, until: datetime, durations: dict[str, timedelta],
+                  reminder_at: datetime | None = None, reminders: list | None = None):
         """Draai run_forever met een nepklok; execute duurt per soort run `durations` lang."""
+        reminders = [] if reminders is None else reminders
         clock = [start]
         executed: list[tuple[datetime, PlannedRun]] = []
 
@@ -188,6 +190,8 @@ class TestRunForever:
         monkeypatch.setattr(scheduler, "execute", fake_execute)
         monkeypatch.setattr(scheduler.time_mod, "sleep", fake_sleep)
         monkeypatch.setattr(scheduler, "load_schedule", lambda *a, **kw: {"clubs": [DAILY_CLUB]})
+        monkeypatch.setattr(scheduler, "next_reminder_at", lambda path: reminder_at)
+        monkeypatch.setattr(scheduler, "send_due_reminders", lambda config: reminders.append(clock[0]))
         monkeypatch.setattr(scheduler, "describe_schedule", lambda schedule: None)
         with pytest.raises(_StopLoop):
             scheduler.run_forever({"booking": BOOKING}, {}, None, debug=False)
@@ -223,6 +227,47 @@ class TestRunForever:
         assert [run.reason for _, run in executed] == [
             "startrun", "ingehaalde volledige run (gemist: 00:00, 00:01)",
         ]
+
+
+class TestHerinneringInPlanner:
+    def _run(self, monkeypatch, reminder_at):
+        reminders = []
+        sent_at = []
+
+        def send(config):
+            sent_at.append(True)
+
+        TestRunForever()._simulate(
+            monkeypatch,
+            start=datetime(2026, 10, 13, 23, 30, tzinfo=TZ),
+            until=datetime(2026, 10, 13, 23, 57, tzinfo=TZ),
+            durations={"gericht": timedelta(minutes=1), "volledig": timedelta(minutes=1)},
+            reminder_at=reminder_at, reminders=reminders,
+        )
+        return reminders
+
+    def test_herinnering_wordt_verstuurd_als_er_geen_run_aankomt(self, monkeypatch):
+        reminders = self._run(monkeypatch, datetime(2026, 10, 13, 23, 40, tzinfo=TZ))
+        assert reminders and reminders[0] >= datetime(2026, 10, 13, 23, 40, tzinfo=TZ)
+
+    def test_herinnering_wacht_niet_op_toekomst(self, monkeypatch):
+        assert self._run(monkeypatch, datetime(2026, 10, 14, 1, 0, tzinfo=TZ)) == []
+
+    def test_herinnering_niet_vlak_voor_een_run(self, monkeypatch):
+        # Gerichte run voor de 00:00-vrijgave start om 23:58; een herinnering om 23:56 moet wachten
+        reminders = self._run(monkeypatch, datetime(2026, 10, 13, 23, 56, tzinfo=TZ))
+        assert reminders == []
+
+
+class TestRemindPending:
+    def test_wacht_en_verwerkt_tot_niets_meer_openstaat(self, monkeypatch):
+        queue = [datetime(2026, 10, 14, 20, 8, tzinfo=TZ), datetime(2026, 10, 14, 20, 30, tzinfo=TZ)]
+        slept, sent = [], []
+        monkeypatch.setattr(scheduler, "next_reminder_at", lambda path: queue[0] if queue else None)
+        monkeypatch.setattr(scheduler, "_sleep_until", slept.append)
+        monkeypatch.setattr(scheduler, "send_due_reminders", lambda config: sent.append(queue.pop(0)))
+        scheduler.remind_pending({})
+        assert slept == sent == [datetime(2026, 10, 14, 20, 8, tzinfo=TZ), datetime(2026, 10, 14, 20, 30, tzinfo=TZ)]
 
 
 class TestWithinRadius:

@@ -90,6 +90,9 @@ or `Reservering op <date> overgeslagen (status: Geannuleerd|…)` → `N boeking
 | `Club-schema ophalen mislukt (…) — cache gebruiken` | GitHub raw fetch failed | Fine short-term; check `generated_at` |
 | `Geen club-schema beschikbaar` | No cache either, so only nightly runs | Serious in smart mode |
 | `HA push notificatie mislukt` | User never gets the payment link | Serious: check `ha_notify_device_id` |
+| `HA push notificatie verzonden: Betaal vóór HH:MM: …` (≥ 2.10.0; before: `Padelbaan beschikbaar!`) | HA accepted the push (HTTP 200). The deadline is sent time + 15 min (iDEAL via Mollie) | Delivery to the phone isn't visible here. If the user saw nothing, test from Developer Tools (README) |
+| `Herinnering gepland om HH:MM …` → `… nog niet betaald — herinnering sturen` / `… is betaald — geen herinnering` / `Betaaltermijn … al verlopen` | Reminder 8 min after the link (≥ 2.10.0), after a fresh `fetch_bookings` | `nog niet betaald` + later `Geannuleerd` = the user missed both pushes |
+| `Betaalherinnering mislukt — openstaande herinneringen gewist` | Unreadable `pending_payments.json` | Code bug: read the traceback |
 | `Ophalen mislukt voor … — future_bookings.json niet bijgewerkt` | Account fetch failed; skip list is stale | May cause double bookings or skipped dates |
 
 ## 3. Pitfalls
@@ -108,6 +111,13 @@ or `Reservering op <date> overgeslagen (status: Geannuleerd|…)` → `N boeking
   `run_forever`/`next_due` in `scheduler.py`.
 - **`.booking_state.json` and `booking_history.json` record claims, not bookings.** They are
   written on `meldt succes`. Since v2.6.0 only `future_bookings.json` counts as "booked".
+- **Unpaid reservations are invisible while pending.** A reservation awaiting payment doesn't show
+  under "Aankomend". It shows up only as `Betaald`, or as `Geannuleerd` once the iDEAL payment expired
+  (15 min). "Not in the account" right after a claim therefore says nothing about whether it'll be paid.
+- **Payment link type.** `Betaalprovider-URL` on `mollie.com` or `pay.ideal.nl` is payable from the phone.
+  A link to `meetandplay.nl/club/…/reserveren` or a club's own cart (e.g. `boeken.terwegen.nl/nl/cart/`)
+  most likely only works in the bot's browser session (cart cookie), so the user probably can't pay
+  from that push. Not verified yet: if a claim with such a link lapses, check this first.
 - **`last_run.json` `success: false`** just means the latest run booked nothing. Normal most of
   the time.
 - **Duplicate claims for the same date** (e.g. two successes for one date hours apart) mean

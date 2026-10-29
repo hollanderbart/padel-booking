@@ -2,10 +2,18 @@
 Unit tests voor notify.py.
 """
 
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 
-from notify import Notifier, _applescript_str, notify_booking_available
+from notify import (
+    Notifier,
+    _applescript_str,
+    notify_booking_available,
+    notify_payment_reminder,
+    payment_deadline,
+    slot_label,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -18,7 +26,7 @@ class TestNotifierSendRouting:
         n = Notifier()
         with patch.object(n, "_send_ha_push") as mock_ha:
             n.send("Titel", "Bericht")
-        mock_ha.assert_called_once_with("Titel", "Bericht", "")
+        mock_ha.assert_called_once_with("Titel", "Bericht", "", False)
 
     def test_zonder_token_darwin_stuurt_macos(self, monkeypatch):
         monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
@@ -41,7 +49,7 @@ class TestNotifierSendRouting:
         n = Notifier()
         with patch.object(n, "_send_ha_push") as mock_ha:
             n.send("T", "M", url="https://pay.nl")
-        mock_ha.assert_called_once_with("T", "M", "https://pay.nl")
+        mock_ha.assert_called_once_with("T", "M", "https://pay.nl", False)
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +101,19 @@ class TestSendHaPush:
             n._send_ha_push("T", "M")
         payload = mock_requests.post.call_args[1]["json"]
         assert "data" not in payload
+
+    def test_time_sensitive_zet_interruption_level(self, monkeypatch):
+        n = self._notifier_with_token(monkeypatch)
+        with patch("notify._requests") as mock_requests:
+            n._send_ha_push("T", "M", url="https://pay.nl", time_sensitive=True)
+        payload = mock_requests.post.call_args[1]["json"]
+        assert payload["data"] == {"url": "https://pay.nl", "push": {"interruption-level": "time-sensitive"}}
+
+    def test_zonder_time_sensitive_geen_push_veld(self, monkeypatch):
+        n = self._notifier_with_token(monkeypatch)
+        with patch("notify._requests") as mock_requests:
+            n._send_ha_push("T", "M", url="https://pay.nl")
+        assert "push" not in mock_requests.post.call_args[1]["json"]["data"]
 
     def test_http_fout_valt_terug_op_console(self, monkeypatch, capsys):
         n = self._notifier_with_token(monkeypatch)
@@ -204,3 +225,43 @@ class TestNotifyFunctions:
 class TestAppleScriptQuoting:
     def test_escapet_quotes_en_backslashes(self):
         assert _applescript_str('a "b" \\c') == '"a \\"b\\" \\\\c"'
+
+
+class TestBetaalmelding:
+    SENT = datetime(2026, 10, 29, 20, 0, 4)
+
+    def test_deadline_voor_mollie_en_ideal(self):
+        for url in ("https://www.mollie.com/checkout/select-method/abc", "https://pay.ideal.nl/transactions/x"):
+            assert payment_deadline(url, self.SENT) == datetime(2026, 10, 29, 20, 15, 4)
+
+    def test_geen_deadline_voor_clubsite_of_meetandplay(self):
+        assert payment_deadline("https://boeken.terwegen.nl/nl/cart/", self.SENT) is None
+        assert payment_deadline("https://meetandplay.nl/club/1/reserveren", self.SENT) is None
+        assert payment_deadline("https://evilmollie.com/x", self.SENT) is None
+
+    def test_slot_label(self):
+        assert slot_label("Hal 0172", "2026-11-12", "20:00 - 21:30 90 minuten") == "Hal 0172, do 12-11 20:00"
+        assert slot_label("Hal 0172", "", "") == "Hal 0172"
+
+    def test_melding_met_deadline_noemt_tijd_en_is_time_sensitive(self):
+        with patch("notify.Notifier") as MockNotifier:
+            notify_booking_available("Baan 1", "20:00 - 21:30", "Hal 0172 — Weg 1", "https://www.mollie.com/x",
+                                     "2026-11-12", "meetandplay", datetime(2026, 11, 1, 20, 15))
+        kwargs = MockNotifier.return_value.send.call_args.kwargs
+        assert kwargs["title"] == "Betaal vóór 20:15: Hal 0172, do 12-11 20:00"
+        assert "15 minuten" in kwargs["message"]
+        assert kwargs["time_sensitive"] is True
+        assert kwargs["url"] == "https://www.mollie.com/x"
+
+    def test_melding_zonder_link_niet_time_sensitive(self):
+        with patch("notify.Notifier") as MockNotifier:
+            notify_booking_available("Baan 1", "20:00", "Club A — Straat 1")
+        assert MockNotifier.return_value.send.call_args.kwargs["time_sensitive"] is False
+
+    def test_herinnering(self):
+        with patch("notify.Notifier") as MockNotifier:
+            notify_payment_reminder("Hal 0172", "2026-11-12", "20:00 - 21:30", "https://www.mollie.com/x",
+                                    datetime(2026, 11, 1, 20, 15))
+        kwargs = MockNotifier.return_value.send.call_args.kwargs
+        assert kwargs["title"] == "Nog niet betaald — vóór 20:15: Hal 0172, do 12-11 20:00"
+        assert kwargs["time_sensitive"] is True and kwargs["url"] == "https://www.mollie.com/x"
