@@ -7,7 +7,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from providers.meetandplay.booking import RELEASE_POLL, MeetAndPlayBooker, PendingReservationError
+from providers.meetandplay.booking import (
+    PAY_ATTEMPTS,
+    RELEASE_POLL,
+    MeetAndPlayBooker,
+    PendingReservationError,
+)
 from providers.base import ProviderResult
 
 
@@ -623,7 +628,8 @@ class TestBookTimeslot:
             ["https://www.meetandplay.nl/club", "https://meetandplay.nl/club/88018/reserveren"],
         )
         assert booker._book_timeslot(page, dict(self.SLOT)) is False
-        assert pay_btn.first.click.call_count == 2
+        assert pay_btn.first.click.call_count == PAY_ATTEMPTS
+        assert page.reload.call_count == PAY_ATTEMPTS - 1   # herladen tussen de pogingen
         save_debug.assert_called_once()
 
     def test_betaalpagina_in_nieuw_tabblad(self):
@@ -657,6 +663,123 @@ class TestIsPaymentUrl:
     def test_herkent_betaalpagina(self, url, expected):
         from providers.meetandplay.booking import _is_payment_url
         assert _is_payment_url(url) is expected
+
+
+# Echte markup uit de winkelwagen van 12-11-2026 (debug_payment_failed.html), na 'Betaling starten'
+CAPTCHA_ERROR_HTML = (
+    '<h1>Winkelwagen</h1>'
+    '<div class="g-recaptcha" data-sitekey="x" data-callback="triggerCaptcha" data-size="invisible">'
+    '<iframe style="display: none;"></iframe></div>'
+    '<!--[if BLOCK]><![endif]--><small class="error">reCAPTCHA is ongeldig. Herlaad de pagina en probeer '
+    'het opnieuw.</small><!--[if ENDBLOCK]><![endif]-->'
+)
+CART = "https://meetandplay.nl/club/88191/reserveren"
+
+
+class TestRecaptchaBijBetalingStarten:
+    """
+    Meet & Play weigert 'Betaling starten' soms met "reCAPTCHA is ongeldig" (reCAPTCHA v3, te lage score).
+    De bot herlaadt dan de winkelwagen en probeert het opnieuw; lukt het niet, dan wordt het slot
+    als gemist gemeld (missed_slots) in plaats van stil te verdwijnen.
+    """
+
+    SLOT = {"slot_id": "slot-1", "time_range": "21:00 - 22:30 90 minuten", "club_name": "Hal 0172",
+            "court_name": "Padelbaan 4"}
+
+    def _page(self, urls, pay_btn=None):
+        page = TestBookTimeslot()._make_page(
+            {
+                "a.timeslot[id='slot-1']": _locator(),
+                "Toevoegen": _locator(),
+                "checkout(slot-1)": _locator(),
+                "input#tos": _locator(),
+                "Betaling starten": pay_btn or _locator(text="Betaling starten"),
+            },
+            ["https://www.meetandplay.nl/club", *urls],
+            html=CAPTCHA_ERROR_HTML,
+        )
+        page.context.pages = []
+        return page
+
+    def test_captcha_melding_wordt_herkend(self):
+        page = MagicMock()
+        page.content.return_value = CAPTCHA_ERROR_HTML
+        assert MeetAndPlayBooker._captcha_rejected(page) is True
+        page.content.return_value = "<h1>Winkelwagen</h1>"
+        assert MeetAndPlayBooker._captcha_rejected(page) is False
+
+    @patch("providers.meetandplay.booking.save_debug_page")
+    def test_herladen_en_opnieuw_proberen_tot_het_lukt(self, save_debug, caplog):
+        booker = _make_booker()
+        pay_btn = _locator(text="Betaling starten")
+        # checkout → winkelwagen; poging 1 en 2 blijven op de winkelwagen (captcha); poging 3 → Mollie
+        page = self._page([CART, CART, CART, "https://www.mollie.com/checkout/select-method/abc"], pay_btn)
+        slot = dict(self.SLOT)
+
+        with caplog.at_level("WARNING"):
+            assert booker._book_timeslot(page, slot) is True
+
+        assert slot["payment_url"] == "https://www.mollie.com/checkout/select-method/abc"
+        assert pay_btn.first.click.call_count == 3
+        assert page.reload.call_count == 2
+        assert [r.message for r in caplog.records if "reCAPTCHA afgewezen" in r.message] == [
+            "reCAPTCHA afgewezen bij 'Betaling starten' (poging 1/4)",
+            "reCAPTCHA afgewezen bij 'Betaling starten' (poging 2/4)",
+        ]
+        save_debug.assert_not_called()
+
+    @patch("providers.meetandplay.booking.save_debug_page")
+    def test_blijvend_afgewezen_geeft_reden_en_error_log(self, save_debug, caplog):
+        booker = _make_booker()
+        pay_btn = _locator(text="Betaling starten")
+        page = self._page([CART], pay_btn)
+        slot = dict(self.SLOT)
+
+        with caplog.at_level("WARNING"):
+            assert booker._book_timeslot(page, slot) is False
+
+        assert slot["payment_url"] == ""
+        assert slot["payment_error"] == "reCAPTCHA afgewezen"
+        assert pay_btn.first.click.call_count == PAY_ATTEMPTS
+        assert page.reload.call_count == PAY_ATTEMPTS - 1
+        errors = [r for r in caplog.records if r.levelname == "ERROR"]
+        assert [r.message for r in errors] == ["Betaling starten mislukt (reCAPTCHA afgewezen) — slot niet geboekt"]
+        save_debug.assert_called_once_with(page, "debug_payment_failed")
+
+    def test_mislukte_betaalstap_wordt_gemist_slot(self):
+        booker = _make_booker()
+        club = {"name": "Hal 0172", "url": "https://meetandplay.nl/club/88191", "address": "Weg 1"}
+
+        def book(page, slot_info):
+            slot_info["payment_error"] = "reCAPTCHA afgewezen"
+            return False
+
+        with patch.object(booker, "_find_timeslot", return_value=dict(self.SLOT)), \
+             patch.object(booker, "_book_timeslot", side_effect=book):
+            result = booker._try_dates_and_clubs(MagicMock(), [datetime(2026, 11, 12)], [club])
+
+        assert result.success is False
+        assert booker._missed_slots == [{
+            "date": "2026-11-12", "club_name": "Hal 0172", "club_url": "https://meetandplay.nl/club/88191",
+            "court_name": "Padelbaan 4", "time_range": "21:00 - 22:30 90 minuten", "reason": "reCAPTCHA afgewezen",
+        }]
+
+    def test_andere_mislukking_is_geen_gemist_slot(self):
+        """Niet in de winkelwagen gekomen (bijv. slot net weg) → niets te melden."""
+        booker = _make_booker()
+        club = {"name": "Hal 0172", "url": "https://x", "address": ""}
+        with patch.object(booker, "_find_timeslot", return_value=dict(self.SLOT)), \
+             patch.object(booker, "_book_timeslot", return_value=False):
+            booker._try_dates_and_clubs(MagicMock(), [datetime(2026, 11, 12)], [club])
+        assert booker._missed_slots == []
+
+    def test_run_geeft_gemiste_slots_door_in_resultaat(self):
+        booker = _make_booker()
+        booker._missed_slots.append({"date": "2026-11-12", "club_name": "Hal 0172"})
+        failure = ProviderResult(success=False, provider="meetandplay", error="Geen tijdslot gevonden")
+        with patch.object(booker, "_run", return_value=failure):
+            result = booker.run()
+        assert result.missed_slots == [{"date": "2026-11-12", "club_name": "Hal 0172"}]
 
 
 class TestAddToCartEigenKnop:

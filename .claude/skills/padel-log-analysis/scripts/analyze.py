@@ -34,6 +34,13 @@ OUTCOMES = [
 ]
 CLAIM = re.compile(r"^Provider '(\w+)' meldt succes: (.*) op (\d{4}-\d{2}-\d{2})")
 ACCOUNT_SKIPPED = re.compile(r"^Reservering op (\d{4}-\d{2}-\d{2}) overgeslagen \(status: (.*)\)$")
+# Slot lag in de winkelwagen maar de betaalstap mislukte (bijv. reCAPTCHA): niet geboekt, wel gevonden.
+# Sinds v2.12.0 logt de provider de reden en meldt de orchestrator het slot (ERROR + pushmelding).
+PAY_FAILED = re.compile(r"Betaling starten mislukt \((.*?)\)|Geen betaallink — slot telt niet als geboekt")
+BOOK_FAILED = re.compile(r"Boeking mislukt bij (.*) op (\d{2})-(\d{2})-(\d{4})")
+MISSED = re.compile(r"^Slot gevonden maar niet geboekt: (.*) op (\d{4}-\d{2}-\d{2}), (.*) \((.*)\)$")
+CAPTCHA = re.compile(r"reCAPTCHA afgewezen bij")
+PAY_URL = re.compile(r"Betaalprovider-URL: ")
 LOGIN = re.compile(r"inloggen (gelukt|mislukt)|Automatisch inloggen mislukt|sessie verlopen", re.I)
 
 
@@ -216,6 +223,40 @@ def report_bookings(entries: list, snap: Path, options: dict, now: datetime) -> 
     print()
 
 
+def report_missed(entries: list) -> None:
+    """Slots die gevonden en in de winkelwagen gelegd zijn, maar waarvan de betaalstap mislukte."""
+    missed, reason = {}, None
+    captcha_rejects = captcha_recovered = 0
+    rejected_in_attempt = False
+    for ts, _, msg in entries:
+        if CAPTCHA.search(msg):
+            captcha_rejects += 1
+            rejected_in_attempt = True
+        elif PAY_URL.search(msg):
+            captcha_recovered += rejected_in_attempt
+            rejected_in_attempt = False
+        if m := PAY_FAILED.search(msg):
+            reason = m.group(1) or "betaalpagina niet bereikt (reden niet gelogd, vóór v2.12.0)"
+            rejected_in_attempt = False
+        elif (m := BOOK_FAILED.search(msg)) and reason:
+            club, day, month, year = m.groups()
+            missed[(f"{year}-{month}-{day}", club)] = (ts, reason, False)
+            reason = None
+        elif m := MISSED.match(msg):
+            club, booked, _, why = m.groups()
+            missed[(booked, club)] = (ts, why, True)
+
+    print("## Gevonden maar niet geboekt (betaalstap mislukt)")
+    for (booked, club), (ts, why, notified) in sorted(missed.items(), key=lambda kv: kv[1][0]):
+        print(f"- {ts:%Y-%m-%d %H:%M} {club} op {booked} — {why}"
+              + (" (gebruiker gemeld)" if notified else " (GEEN melding naar gebruiker)"))
+    if not missed:
+        print("- geen")
+    if captcha_rejects:
+        print(f"- reCAPTCHA afgewezen: {captcha_rejects}x; daarna toch een betaallink: {captcha_recovered}x")
+    print()
+
+
 def report_warnings(entries: list, tracebacks: list, since: datetime) -> None:
     print("## Waarschuwingen / fouten (gegroepeerd)")
     groups = {}
@@ -293,6 +334,7 @@ def main(snap: Path) -> None:
     restarts = report_window(entries, now)
     report_runs(entries)
     report_bookings(entries, snap, info.get("options", {}), now)
+    report_missed(entries)
     report_warnings(entries, tracebacks, restarts[-1] if restarts else entries[0][0])
     report_sessions(entries, snap, now)
     report_files(snap, now)

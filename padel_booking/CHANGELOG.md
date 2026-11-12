@@ -1,3 +1,10 @@
+## 2.12.0
+
+- Fix (Meet & Play): "Betaling starten" werd soms geweigerd met **"reCAPTCHA is ongeldig. Herlaad de pagina en probeer het opnieuw."** (onzichtbare reCAPTCHA v3). De addon klikte dan nog één keer op dezelfde pagina en gaf het op; zo ging op 12-11 een gevonden baan (Hal 0172, 21:00) verloren. Nu herlaadt hij de winkelwagen tussen de pogingen, zoals de melding vraagt, en probeert hij het tot 4 keer. In de log: `reCAPTCHA afgewezen bij 'Betaling starten' (poging n/4)` en, als het niet lukt, `ERROR Betaling starten mislukt (reCAPTCHA afgewezen)`
+- Nieuwe melding **Baan gevonden, niet geboekt: <club>, <dag> <tijd>**: lag een slot al in de winkelwagen maar lukte de betaalstap niet, dan hoor je dat nu (met de reden en een link naar de club), zodat je de baan zelf kunt boeken. Voorheen gebeurde dat stil. In de log: `ERROR Slot gevonden maar niet geboekt: …`. Provider-resultaten hebben daarvoor een nieuw veld `missed_slots`
+- Fix: de log van een provider (`[meetandplay] …`) verschijnt nu live, met de juiste tijd en het juiste level. Voorheen werd alles pas na afloop gelogd, met de eindtijd (bijv. alles om 00:11:20 voor een slot dat om 00:04 gevonden was), en was elke WARNING/ERROR van de provider een INFO
+- Docs: in `schedule_mode: smart` is geen automation nodig (en een "dagelijkse run"-automation wekt de verkeerde indruk); de addon plant zelf
+
 ## 2.11.0
 
 - Betalen kan nu op twee manieren vanuit de melding. Tikken opent zoals voorheen de Mollie-betaalpagina, die op elk apparaat werkt zonder in te loggen. Nieuw is de knop **Open in Meet & Play**: die opent de reservering in je account (`/mijn-aankopen/order/…`, "In afwachting van betaling" + **Betaling starten**), op elk apparaat waarop je bij Meet & Play bent ingelogd. Dat is de terugvaloptie als de betaallink niet werkt, bijv. bij een club met een eigen boekingssite. Getest met een echte (onbetaalde) reservering

@@ -52,7 +52,7 @@ class TestProviderResult:
         result.write_stdout()
         captured = capsys.readouterr()
         data = json.loads(captured.out)
-        assert set(data.keys()) == {"success", "provider", "booked_date", "slot_info", "error"}
+        assert set(data.keys()) == {"success", "provider", "booked_date", "slot_info", "error", "missed_slots"}
 
 
 class TestSlotInfo:
@@ -174,4 +174,5 @@ class TestRunProviderCli:
         with patch("sys.stdin", io.StringIO("{}")):
             base.run_provider_cli("x", factory)
         data = json.loads(capsys.readouterr().out)
-        assert data == {"success": False, "provider": "x", "booked_date": None, "slot_info": None, "error": "kapot"}
+        assert data == {"success": False, "provider": "x", "booked_date": None, "slot_info": None, "error": "kapot",
+                        "missed_slots": None}

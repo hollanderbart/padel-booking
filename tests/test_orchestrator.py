@@ -5,7 +5,7 @@ Unit tests voor orchestrator.py — geen browser of credentials nodig.
 import asyncio
 import json
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -191,12 +191,32 @@ class TestBuildProviderRequest:
 # run_provider (async)
 # ---------------------------------------------------------------------------
 
+class _FakeProc:
+    """Subprocess-nabootsing: stdout in één keer, stderr regel voor regel (zoals asyncio.StreamReader)."""
+
+    def __init__(self, stdout: bytes, stderr: bytes = b"", returncode: int = 0):
+        self.returncode = None
+        self._final_returncode = returncode
+        self.stdin = MagicMock()
+        self.stdin.drain = AsyncMock()
+        self.stdout = MagicMock()
+        self.stdout.read = AsyncMock(return_value=stdout)
+        lines = [line + b"\n" for line in stderr.splitlines()] + [b""]
+        self.stderr = MagicMock()
+        self.stderr.readline = AsyncMock(side_effect=lines)
+        self.stderr.read = AsyncMock(return_value=b"")
+
+    async def wait(self):
+        self.returncode = self._final_returncode
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -9
+
+
 class TestRunProvider:
     def _make_mock_proc(self, stdout: bytes, stderr: bytes = b"", returncode: int = 0):
-        proc = AsyncMock()
-        proc.communicate = AsyncMock(return_value=(stdout, stderr))
-        proc.returncode = returncode
-        return proc
+        return _FakeProc(stdout, stderr, returncode)
 
     @pytest.mark.asyncio
     async def test_succesvolle_provider_retourneert_resultaat(self):
@@ -248,6 +268,133 @@ class TestRunProvider:
 
         # De timestamp+level prefix moet worden gestript
         assert any("Provider log regel" in r.message for r in caplog.records)
+
+
+class TestProviderLogLive:
+    """
+    Provider-logregels moeten verschijnen terwijl de provider draait, met het juiste level.
+    Vroeger werd stderr pas na afloop gelogd (alles met de eindtijd, bijv. 00:11:20 voor een slot
+    dat om 00:04 gevonden was) en werd elke WARNING/ERROR een INFO.
+    """
+
+    @pytest.mark.asyncio
+    async def test_level_van_provider_blijft_behouden(self, caplog):
+        import logging
+        stderr = (
+            b"2026-11-12 00:04:10  INFO      [meetandplay]  'Betaling starten' klikken (poging 1/4)...\n"
+            b"2026-11-12 00:04:12  WARNING   [meetandplay]  reCAPTCHA afgewezen bij 'Betaling starten' (poging 1/4)\n"
+            b"2026-11-12 00:04:40  ERROR     [meetandplay]  Onverwachte fout\n"
+            b"Traceback (most recent call last):\n"
+            b"RuntimeError: kapot\n"
+        )
+        result_json = json.dumps({"success": False, "provider": "meetandplay", "error": "x"})
+        with patch("asyncio.create_subprocess_exec", return_value=_FakeProc(result_json.encode(), stderr)):
+            with caplog.at_level(logging.DEBUG, logger="orchestrator"):
+                await run_provider("meetandplay", {}, debug=False)
+
+        levels = {r.getMessage(): r.levelname for r in caplog.records}
+        assert levels["[meetandplay]  'Betaling starten' klikken (poging 1/4)..."] == "INFO"
+        assert levels["[meetandplay]  reCAPTCHA afgewezen bij 'Betaling starten' (poging 1/4)"] == "WARNING"
+        assert levels["[meetandplay]  Onverwachte fout"] == "ERROR"
+        # Traceback-regels (zonder eigen prefix) horen bij de ERROR erboven
+        assert levels["RuntimeError: kapot"] == "ERROR"
+
+    @pytest.mark.asyncio
+    async def test_regels_worden_gelogd_terwijl_de_provider_draait(self, caplog):
+        """Echte subprocess: de eerste regel moet gelogd zijn vóórdat de provider klaar is."""
+        import logging
+        import sys
+        import time
+
+        script = (
+            "import json, sys, time\n"
+            "print('2026-11-12 00:04:00  INFO      [x]  slot gevonden', file=sys.stderr, flush=True)\n"
+            "time.sleep(1.0)\n"
+            "print('2026-11-12 00:11:20  INFO      [x]  klaar', file=sys.stderr, flush=True)\n"
+            "json.load(sys.stdin)\n"
+            "print(json.dumps({'success': False, 'provider': 'x', 'error': 'geen slot'}))\n"
+        )
+        real_exec = asyncio.create_subprocess_exec
+
+        async def exec_script(*cmd, **kwargs):
+            return await real_exec(sys.executable, "-c", script, **kwargs)
+
+        start = time.time()
+        with patch("asyncio.create_subprocess_exec", side_effect=exec_script):
+            with caplog.at_level(logging.INFO, logger="orchestrator"):
+                result = await run_provider("x", {"k": "v"}, debug=False)
+
+        assert result["error"] == "geen slot"
+        times = {r.getMessage(): r.created for r in caplog.records}
+        found, done = times["[x]  slot gevonden"], times["[x]  klaar"]
+        assert found - start < 0.8, "eerste regel pas na afloop gelogd"
+        assert done - found >= 0.8
+
+    @pytest.mark.asyncio
+    async def test_zeer_lange_regel_breekt_niet(self, caplog):
+        long_line = b"2026-11-12 00:04:00  INFO      [x]  " + b"a" * (orchestrator.PROVIDER_STREAM_LIMIT + 10)
+        proc = _FakeProc(b'{"success": false, "provider": "x"}')
+        proc.stderr.readline = AsyncMock(side_effect=[ValueError("limit"), b""])
+        proc.stderr.read = AsyncMock(return_value=long_line)
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            result = await run_provider("x", {}, debug=False)
+        assert result["success"] is False
+
+
+class TestGemisteSlots:
+    """Slot gevonden maar betaalstap mislukt → ERROR in de log + pushmelding om het zelf te boeken."""
+
+    MISSED = {"date": "2026-11-12", "club_name": "Hal 0172", "club_url": "https://meetandplay.nl/club/88191",
+              "court_name": "Padelbaan 4", "time_range": "21:00 - 22:30 90 minuten", "reason": "reCAPTCHA afgewezen"}
+
+    @pytest.mark.asyncio
+    async def test_run_all_providers_verzamelt_gemiste_slots(self):
+        async def fake_run_provider(name, request, debug):
+            return {"success": False, "provider": name, "error": "geen", "missed_slots": [self.MISSED]}
+
+        missed = []
+        with patch("orchestrator.run_provider", side_effect=fake_run_provider):
+            assert await run_all_providers([("meetandplay", {})], debug=False, missed=missed) is None
+        assert missed == [{**self.MISSED, "provider": "meetandplay"}]
+
+    def test_melding_en_error_log(self, monkeypatch, caplog):
+        sent = []
+        monkeypatch.setattr(orchestrator, "notify_slot_missed", lambda *a: sent.append(a))
+        with caplog.at_level("ERROR"):
+            orchestrator.report_missed_slots([self.MISSED, dict(self.MISSED)], booked_dates=set())
+
+        assert sent == [("Hal 0172", "2026-11-12", "21:00 - 22:30 90 minuten", "Padelbaan 4",
+                         "reCAPTCHA afgewezen", "https://meetandplay.nl/club/88191")]   # één keer, niet dubbel
+        assert [r.getMessage() for r in caplog.records] == [
+            "Slot gevonden maar niet geboekt: Hal 0172 op 2026-11-12, Padelbaan 4 21:00 - 22:30 90 minuten "
+            "(reCAPTCHA afgewezen)"
+        ]
+
+    def test_geen_melding_als_de_datum_alsnog_geboekt_is(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(orchestrator, "notify_slot_missed", lambda *a: sent.append(a))
+        orchestrator.report_missed_slots([self.MISSED], booked_dates={"2026-11-12"})
+        assert sent == []
+
+    @pytest.mark.asyncio
+    async def test_main_async_meldt_gemist_slot_bij_mislukte_run(self, tmp_path, monkeypatch):
+        config = _minimal_config()
+        config["state"] = {k: str(tmp_path / f"{k}.json") for k in
+                           ("booking_state_file", "history_file", "last_run_file", "pending_payments_file")}
+        config["fetch_bookings"] = {"skip_booked_dates": True, "output_file": str(tmp_path / "future.json")}
+        monkeypatch.setattr(orchestrator, "load_config", lambda: config)
+        monkeypatch.setattr(orchestrator, "load_dotenv", lambda: None)
+        monkeypatch.setattr(orchestrator, "open_dates", lambda cfg, skip: ["2026-11-12"])
+        sent = []
+        monkeypatch.setattr(orchestrator, "notify_slot_missed", lambda *a: sent.append(a))
+
+        async def fake_run_all(requests, debug, missed=None):
+            missed.append(dict(self.MISSED, provider="meetandplay"))
+            return None
+
+        monkeypatch.setattr(orchestrator, "run_all_providers", fake_run_all)
+        assert await main_async(debug=False, dry_run=False) == 1
+        assert len(sent) == 1 and sent[0][0] == "Hal 0172"
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +545,7 @@ class TestMainAsync:
 
     @staticmethod
     def _provider_that_books_first_open_date(seen_skips):
-        async def fake_run_all(requests, debug):
+        async def fake_run_all(requests, debug, missed=None):
             skip = requests[0][1]["booking_request"]["skip_dates"]
             seen_skips.append(list(skip))
             free = [d for d in ["2026-10-15", "2026-10-22"] if d not in skip]

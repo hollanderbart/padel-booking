@@ -43,6 +43,9 @@ class ProviderResult:
     booked_date: str | None = None   # ISO date "YYYY-MM-DD"
     slot_info: dict | None = None
     error: str | None = None
+    # Gevonden slots die niet geboekt konden worden (bijv. betaalstap geweigerd): de gebruiker
+    # krijgt hiervan een melding, zodat hij het slot nog zelf kan boeken
+    missed_slots: list[dict] | None = None
 
     def write_stdout(self) -> None:
         """Schrijf resultaat als JSON naar stdout. Roep precies één keer aan."""

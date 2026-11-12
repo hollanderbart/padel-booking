@@ -174,3 +174,19 @@ def notify_payment_reminder(club_name: str, booked_date: str, time_range: str, p
         message += "\nOf kies 'Open in Meet & Play' → Betaling starten."
     Notifier().send(title=title, message=message, sound=True, url=payment_url or order_url, time_sensitive=True,
                     actions=_order_actions(order_url))
+
+
+def notify_slot_missed(club_name: str, booked_date: str, time_range: str, court_name: str = "",
+                       reason: str = "", club_url: str = "") -> None:
+    """
+    Er is een slot gevonden en in de winkelwagen gelegd, maar de bot kon de betaling niet starten
+    (bijv. reCAPTCHA afgewezen). Het slot is dan niet geboekt, maar is misschien nog vrij.
+    """
+    label = slot_label(club_name, booked_date, time_range)
+    title = f"Baan gevonden, niet geboekt: {label}"
+    court = f"{court_name} — {time_range}" if court_name else time_range
+    message = (
+        f"{court}\nDe bot kon de betaling niet starten ({reason or 'onbekende reden'}).\n\n"
+        "Misschien is de baan nog vrij: tik om hem zelf te boeken."
+    )
+    Notifier().send(title=title, message=message, sound=True, url=club_url, time_sensitive=bool(club_url))

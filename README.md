@@ -104,9 +104,11 @@ INFO  HA push notificatie verzonden: Betaal vóór 20:15: Sportcentrum Boskoop, 
 ### Stap 5 — Automatisering instellen
 
 **`schedule_mode: smart` (standaard)**: de addon blijft draaien en plant zelf de runs (zie
-[Wanneer komen banen vrij?](#wanneer-komen-banen-vrij-booking-research)). Een automation is niet nodig,
-maar wel handig als vangnet: als de addon gestopt is, start de automation hem weer. Is hij al
-actief, dan doet `addon_start` niets.
+[Wanneer komen banen vrij?](#wanneer-komen-banen-vrij-booking-research)). **Maak hiervoor geen automation
+aan**: de planner doet zelf de nachtrun (00:01) en de runs op de vrijgavemomenten. Met *Start on boot* en de
+*Watchdog* aan start HA de addon na een herstart of crash vanzelf. Een oude automation die `addon_start` doet
+kun je verwijderen; als de addon al draait doet hij niets, en een naam als "dagelijkse run" wekt de indruk dat
+de addon maar één keer per dag zoekt.
 
 **`schedule_mode: nightly`**: de addon doet één run per start. Voeg dan een automation toe via
 **Settings → Automations → + Create automation**:
@@ -386,6 +388,12 @@ openstaat, staat de reservering onder "Aankomend" als "In afwachting van betalin
 - Zonder vasthoudtijd van de orderpagina en zonder Mollie/iDEAL-link (bijv. de boekingssite van een club) is de
   termijn onbekend: dan staat er "Padelbaan beschikbaar: …" en volgt de herinnering 8 minuten na de melding.
 
+**Baan gevonden, niet geboekt**: lag een slot al in de winkelwagen maar lukte "Betaling starten" niet (zie
+[Troubleshooting](#baan-gevonden-niet-geboekt--recaptcha-is-ongeldig-meet--play)), dan krijg je een melding
+`Baan gevonden, niet geboekt: Hal 0172, do 12-11 21:00` met de reden. Tikken opent de club, zodat je de baan
+zelf kunt boeken als hij nog vrij is. Is de datum in dezelfde run alsnog bij een andere club geboekt, dan
+komt deze melding niet.
+
 Er worden **geen** notificaties gestuurd als er geen baan gevonden wordt.
 
 ---
@@ -556,13 +564,24 @@ TERWEGEN INDOOR buiten straal: 18.9 km (straal 14 km) — niet gepland
 Een club waarvan de locatie nog niet bekend is, blijft ingepland. De eerste run die hem bezoekt slaat de
 coördinaten op, en vanaf de volgende verversing valt hij af als hij te ver weg ligt.
 
-### Notificatie zonder betaallink / "Geen betaallink — slot telt niet als geboekt" (Meet & Play)
+### Baan gevonden, niet geboekt / "reCAPTCHA is ongeldig" (Meet & Play)
 
 Na "Betaling starten" moet de addon op de betaalpagina uitkomen (iDEAL of de boekingssite van de club).
-Blijft hij op `meetandplay.nl/club/<id>/reserveren` staan, dan probeert hij het nog één keer en anders telt
-het slot niet als gevonden (de winkelwagen zit alleen in de sessie van de addon, dus jij kunt er niet bij).
-Hij zoekt dan verder bij de volgende club. Ter diagnose bewaart de addon een screenshot en de HTML van die
-pagina:
+Meet & Play controleert die klik met een onzichtbare reCAPTCHA (v3). Vertrouwt die de browser niet, dan
+blijft de winkelwagen staan met **"reCAPTCHA is ongeldig. Herlaad de pagina en probeer het opnieuw."** De
+addon herlaadt dan de winkelwagen en probeert het opnieuw, tot 4 keer. In de log:
+
+```
+WARNING  [meetandplay]  reCAPTCHA afgewezen bij 'Betaling starten' (poging 1/4)
+INFO     [meetandplay]  Betaalprovider-URL: https://www.mollie.com/…        ← gelukt bij een volgende poging
+ERROR    [meetandplay]  Betaling starten mislukt (reCAPTCHA afgewezen) — slot niet geboekt
+ERROR    Slot gevonden maar niet geboekt: Hal 0172 op 2026-11-12, Padelbaan 4 21:00 - 22:30 … (reCAPTCHA afgewezen)
+```
+
+Lukt geen enkele poging, dan telt het slot niet als geboekt (de winkelwagen zit alleen in de sessie van de
+addon, dus jij kunt er niet bij), zoekt de addon verder bij de volgende club, en krijg je de melding
+**Baan gevonden, niet geboekt** om hem zelf te boeken. Ter diagnose bewaart de addon een screenshot en de
+HTML van die pagina:
 
 ```bash
 $SSH "ls -l /config/padel/debug_payment_failed.*"

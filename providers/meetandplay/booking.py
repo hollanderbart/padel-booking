@@ -52,7 +52,11 @@ PAY_BUTTON_SELECTORS = [
     'button:has-text("Betalen")',
     'a:has-text("Betalen")',
 ]
-PAY_ATTEMPTS = 2
+PAY_ATTEMPTS = 4
+# Onzichtbare reCAPTCHA v3 op 'Betaling starten': bij een te lage score toont de winkelwagen deze melding.
+# De site vraagt zelf om de pagina te herladen en het opnieuw te proberen.
+CAPTCHA_REJECTED_TEXT = "reCAPTCHA is ongeldig"
+PAY_RETRY_DELAY_MS = 3000
 # Je eigen reserveringen; een onbetaalde staat er als "In afwachting van betaling" met een orderpagina
 # ("De reservering wordt tot 13:09 vastgehouden" + knop "Betaling starten"), op elk ingelogd apparaat
 ORDERS_URL = "https://meetandplay.nl/mijn-aankopen"
@@ -128,6 +132,8 @@ class MeetAndPlayBooker:
         self._dry_run = request.get("dry_run", False)
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
+        # Slots die in de winkelwagen lagen maar niet geboekt werden (betaalstap mislukt)
+        self._missed_slots: list[dict] = []
 
         cookies_file = self._provider_config.get("cookies_file", ".meetandplay_cookies.json")
         self.session_manager = SessionManager(cookies_file)
@@ -633,32 +639,56 @@ class MeetAndPlayBooker:
                     return other.url
         return ""
 
-    def _fetch_payment_url(self, page: Page) -> str:
+    @staticmethod
+    def _captcha_rejected(page: Page) -> bool:
+        with contextlib.suppress(Exception):
+            return CAPTCHA_REJECTED_TEXT.lower() in page.content().lower()
+        return False
+
+    def _reload_cart(self, page: Page) -> None:
+        """Winkelwagen herladen (zoals de reCAPTCHA-melding vraagt) en de voorwaarden opnieuw aanvinken."""
+        with contextlib.suppress(Exception):
+            page.reload(wait_until="load", timeout=30000)
+        self._accept_terms(page)
+        # reCAPTCHA v3 scoort o.a. op tijd op de pagina: niet direct na het laden klikken
+        page.wait_for_timeout(PAY_RETRY_DELAY_MS)
+
+    def _fetch_payment_url(self, page: Page) -> tuple[str, str]:
         """
-        Accepteer de voorwaarden en klik door naar de betaalprovider. Geeft de betaal-URL terug,
-        of "" als de betaalpagina niet bereikt is (de winkelwagen zit dan alleen in de sessie van de bot).
+        Accepteer de voorwaarden en klik door naar de betaalprovider. Geeft (betaal-URL, "") terug,
+        of ("", reden) als de betaalpagina niet bereikt is (de winkelwagen zit dan alleen in de sessie
+        van de bot). Na een mislukte klik wordt de winkelwagen herladen voor de volgende poging.
         """
         logger.info("Winkelwagen bereikt — voorwaarden accepteren en betaallink ophalen...")
         self._accept_terms(page)
 
+        reason = "betaalpagina niet bereikt"
         for attempt in range(1, PAY_ATTEMPTS + 1):
             pay_btn = _first_present(page, PAY_BUTTON_SELECTORS, visible=True)
             if pay_btn is None:
-                logger.warning("Betaalknop niet gevonden (poging %d)", attempt)
+                logger.warning("Betaalknop niet gevonden (poging %d/%d)", attempt, PAY_ATTEMPTS)
+                reason = "betaalknop niet gevonden"
                 break
-            logger.info("'%s' klikken (poging %d)...", pay_btn.first.inner_text().strip(), attempt)
+            logger.info("'%s' klikken (poging %d/%d)...", pay_btn.first.inner_text().strip(), attempt, PAY_ATTEMPTS)
             pay_btn.first.click()
             with contextlib.suppress(Exception):
                 page.wait_for_url(_is_payment_url, timeout=30000)
             page.wait_for_timeout(2000)
             if url := self._payment_page_url(page):
                 logger.info("Betaalprovider-URL: %s", url)
-                return url
-            logger.warning("Betaalpagina niet bereikt na klik (URL: %s)", page.url)
-            self._accept_terms(page)
+                return url, ""
+            if self._captcha_rejected(page):
+                reason = "reCAPTCHA afgewezen"
+                logger.warning("reCAPTCHA afgewezen bij 'Betaling starten' (poging %d/%d)", attempt, PAY_ATTEMPTS)
+            else:
+                reason = "betaalpagina niet bereikt"
+                logger.warning("Betaalpagina niet bereikt na klik (poging %d/%d, URL: %s)", attempt, PAY_ATTEMPTS, page.url)
+            if attempt < PAY_ATTEMPTS:
+                self._reload_cart(page)
 
+        logger.error("Betaling starten mislukt (%s) — slot niet geboekt", reason)
         save_debug_page(page, "debug_payment_failed")
-        return ""
+        return "", reason
 
     def _book_timeslot(self, page: Page, slot_info: dict) -> bool:
         slot_id = slot_info["slot_id"]
@@ -668,8 +698,9 @@ class MeetAndPlayBooker:
         )
         if not (self._add_to_cart(page, slot_id) and self._checkout(page, slot_id)):
             return False
-        slot_info["payment_url"] = self._fetch_payment_url(page)
+        slot_info["payment_url"], payment_error = self._fetch_payment_url(page)
         if not slot_info["payment_url"]:
+            slot_info["payment_error"] = payment_error
             logger.warning("Geen betaallink — slot telt niet als geboekt")
             return False
         return True
@@ -693,6 +724,16 @@ class MeetAndPlayBooker:
 
         if not booked:
             logger.warning("Boeking mislukt bij %s op %s", club["name"], booking_date.strftime("%d-%m-%Y"))
+            if slot_info and slot_info.get("payment_error"):
+                # Slot lag al in de winkelwagen: de gebruiker kan hem misschien nog zelf boeken
+                self._missed_slots.append({
+                    "date": booking_date.strftime("%Y-%m-%d"),
+                    "club_name": club["name"],
+                    "club_url": club.get("url", ""),
+                    "court_name": slot_info.get("court_name", ""),
+                    "time_range": slot_info.get("time_range", ""),
+                    "reason": slot_info["payment_error"],
+                })
             return None
         slot_info.update(self._pending_order(booking_date, slot_info))
         return ProviderResult(
@@ -821,6 +862,12 @@ class MeetAndPlayBooker:
         return _failure(f"Geen tijdslot gevonden voor {len(booking_dates)} datum(s) bij {len(clubs)} club(s)")
 
     def run(self) -> ProviderResult:
+        result = self._run()
+        if self._missed_slots:
+            result.missed_slots = list(self._missed_slots)
+        return result
+
+    def _run(self) -> ProviderResult:
         logger.info("=" * 60)
         logger.info("Meet & Play provider gestart")
         logger.info("=" * 60)

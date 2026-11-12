@@ -80,8 +80,8 @@ or `Reservering op <date> overgeslagen (status: Geannuleerd|…)` → `N boeking
 | `Meet & Play niet bereikbaar (net::ERR_…) — storing of netwerkprobleem` (≥ 2.8.1) | Site unreachable before any credentials were sent. Before 2.8.1 this showed up as `Fout tijdens automatisch inloggen: Page.goto: net::ERR_…` + "Controleer KNLTB_EMAIL/KNLTB_PASSWORD" | Not a login or block problem. Check from another network (e.g. WebFetch) whether the site is down for everyone; same DNS answer + refusal everywhere = outage. Only DNS differences between host and elsewhere point at a local DNS blocker |
 | `Doorgestuurd naar loginpagina tijdens boeking` | Session died mid-booking | Serious if it repeats |
 | `Livewire datum-component niet gevonden` / `'Toevoegen…'-knop niet gevonden` / `'Afrekenen'-knop niet gevonden` / `TOS checkbox niet gevonden` / `Betaalknop niet gevonden` | Meet & Play page structure changed | Code fix in `providers/meetandplay/booking.py` likely |
-| `Betaalpagina niet bereikt na klik` followed by a Mollie URL on attempt 2 | Retry worked | Noise |
-| `Geen betaallink — slot telt niet als geboekt` | Cart reached but no payment URL | Slot not reserved; investigate if it repeats |
+| `Betaalpagina niet bereikt na klik` or `reCAPTCHA afgewezen bij 'Betaling starten' (poging n/4)` followed by `Betaalprovider-URL` | Retry worked (since 2.12.0 the cart is reloaded between attempts) | Noise, unless it needs 3–4 attempts every time |
+| `Betaling starten mislukt (<reden>) — slot niet geboekt` → `Geen betaallink …` → `Boeking mislukt bij <club> op <datum>` | Slot was in the cart, but no payment page after 4 attempts. `reCAPTCHA afgewezen` = Meet & Play's invisible reCAPTCHA v3 rejected the click (screenshot shows "reCAPTCHA is ongeldig") | **Important**: a court was found and lost. Since 2.12.0 the orchestrator logs `ERROR Slot gevonden maar niet geboekt: …` and pushes "Baan gevonden, niet geboekt". Before 2.12.0 there was no reason and no push: the user never knew. `analyze.py` lists these under "Gevonden maar niet geboekt" |
 | `openstaande reservering in deze sessie` (PendingReservationError) | An earlier unpaid cart blocks a new one; provider opens a fresh session | Fine if followed by success |
 | `Geen clubs gevonden met de opgegeven filters` / `0 club(s) gevonden` | Search filters/radius/city wrong, or search page broken | Check options; serious if sudden |
 | `Geen clubcoördinaten op de zoekpagina` | Distance filter can't work | Code fix |
@@ -97,10 +97,12 @@ or `Reservering op <date> overgeslagen (status: Geannuleerd|…)` → `N boeking
 
 ## 3. Pitfalls
 
-- **Provider timestamps are relay times.** The orchestrator collects the provider's stderr
-  and logs it all when the subprocess exits, so every `[meetandplay]` line of one run has the
-  same timestamp (when the provider finished). Don't read durations from them; use
-  `Provider … gestart` → `meldt …`.
+- **Provider timestamps before v2.12.0 are relay times.** The orchestrator collected the provider's
+  stderr and logged it all when the subprocess exited, so every `[meetandplay]` line of one run had the
+  same timestamp (when the provider finished, e.g. 00:11:20 for a slot found at ~00:04) and every
+  provider WARNING/ERROR was logged as INFO. Don't read durations from such lines; use
+  `Provider … gestart` → `meldt …`, or the mtime of a `debug_*.png`. From v2.12.0 provider lines are
+  streamed live with their own level.
 - **Collisions between runs.** The scheduler is single-threaded: while a run and its retries
   (up to ~+6 min) execute, other due runs wait. **Before v2.7.1** anything more than 2 min late
   was silently dropped. Seen in practice: a targeted 00:00 release run with retries swallowed

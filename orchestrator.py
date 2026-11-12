@@ -14,6 +14,7 @@ Gebruik:
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -27,7 +28,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
-from notify import notify_booking_available, notify_payment_reminder, payment_deadline
+from notify import notify_booking_available, notify_payment_reminder, notify_slot_missed, payment_deadline
 from providers.base import booking_days, upcoming_booking_dates
 
 logger = logging.getLogger(__name__)
@@ -39,8 +40,10 @@ REMINDER_BEFORE = timedelta(minutes=7)
 REMINDER_MIN = timedelta(minutes=1)
 REMINDER_AFTER = timedelta(minutes=8)
 PAID_STATUSES = ("betaald", "confirmed")
-# Providers loggen zelf al een timestamp + level; strip die om dubbele prefixes te voorkomen
-PROVIDER_LOG_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+\w+\s+")
+# Providers loggen zelf al een timestamp + level; strip die om dubbele prefixes te voorkomen.
+# Het level wordt overgenomen, zodat WARNING/ERROR van een provider ook zo in de addon-log staan.
+PROVIDER_LOG_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+(\w+)\s+")
+PROVIDER_STREAM_LIMIT = 1024 * 1024   # max. regellengte van provider-output (asyncio-standaard is 64 KiB)
 
 
 @dataclass(frozen=True)
@@ -259,6 +262,33 @@ def write_last_run(last_run_file: Path, success: bool, provider: str | None = No
 # Provider subproces uitvoering
 # ---------------------------------------------------------------------------
 
+def _provider_log_level(name: str, default: int) -> int:
+    level = logging.getLevelName(name.upper())
+    return level if isinstance(level, int) else default
+
+
+async def _relay_provider_log(stream: asyncio.StreamReader) -> None:
+    """
+    Log de stderr van een provider regel voor regel terwijl hij draait, zodat de tijden in de
+    addon-log kloppen. Regels zonder eigen prefix (bijv. een traceback) krijgen het level van
+    de regel ervoor.
+    """
+    level = logging.INFO
+    while True:
+        try:
+            raw = await stream.readline()
+        except ValueError:  # regel langer dan PROVIDER_STREAM_LIMIT
+            raw = await stream.read(PROVIDER_STREAM_LIMIT)
+        if not raw:
+            return
+        line = raw.decode(errors="replace").rstrip()
+        if not line.strip():
+            continue
+        if match := PROVIDER_LOG_PREFIX.match(line):
+            level = _provider_log_level(match.group(1), logging.INFO)
+        logger.log(level, PROVIDER_LOG_PREFIX.sub("", line))
+
+
 async def run_provider(name: str, request: dict, debug: bool) -> dict:
     """
     Start een provider als subprocess, stuur request op stdin,
@@ -270,20 +300,21 @@ async def run_provider(name: str, request: dict, debug: bool) -> dict:
 
     logger.info("Provider '%s' gestart...", name)
 
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=PROVIDER_STREAM_LIMIT,
         )
 
-        input_data = json.dumps(request).encode()
-        stdout, stderr = await proc.communicate(input=input_data)
-
-        for line in stderr.decode(errors="replace").splitlines():
-            if line.strip():
-                logger.info(PROVIDER_LOG_PREFIX.sub("", line))
+        proc.stdin.write(json.dumps(request).encode())
+        await proc.stdin.drain()
+        proc.stdin.close()
+        stdout, _ = await asyncio.gather(proc.stdout.read(), _relay_provider_log(proc.stderr))
+        await proc.wait()
 
         if not stdout.strip():
             logger.warning("Provider '%s' gaf geen output (exit code: %s)", name, proc.returncode)
@@ -298,16 +329,21 @@ async def run_provider(name: str, request: dict, debug: bool) -> dict:
 
     except asyncio.CancelledError:
         logger.info("Provider '%s' geannuleerd", name)
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
         raise
     except Exception as e:  # noqa: BLE001 — een crashende provider mag de andere niet stoppen
         logger.warning("Provider '%s' fout: %s", name, e)
         return {"success": False, "provider": name, "error": str(e)}
 
 
-async def run_all_providers(provider_requests: list[tuple[str, dict]], debug: bool) -> dict | None:
+async def run_all_providers(provider_requests: list[tuple[str, dict]], debug: bool,
+                            missed: list[dict] | None = None) -> dict | None:
     """
     Start alle providers parallel. Geeft het resultaat van de eerste
-    die succes meldt terug, en annuleert de rest.
+    die succes meldt terug, en annuleert de rest. Slots die een provider vond maar niet kon
+    boeken (`missed_slots`) worden aan `missed` toegevoegd.
     """
     if not provider_requests:
         return None
@@ -330,6 +366,9 @@ async def run_all_providers(provider_requests: list[tuple[str, dict]], debug: bo
                 logger.warning("Taak '%s' gooit exception: %s", task.get_name(), e)
                 continue
 
+            if missed is not None and result.get("missed_slots"):
+                missed.extend(dict(slot, provider=result.get("provider", task.get_name()))
+                              for slot in result["missed_slots"])
             if result.get("success"):
                 # Annuleer resterende providers
                 for p in pending:
@@ -485,6 +524,29 @@ def _handle_success(result: dict, dry_run: bool, state_file: Path, history_file:
     _print_summary(provider, slot_info)
 
 
+def report_missed_slots(missed: list[dict], booked_dates: set[str]) -> None:
+    """
+    Meld slots die gevonden zijn maar niet geboekt konden worden (bijv. reCAPTCHA bij 'Betaling
+    starten'), zodat de gebruiker ze nog zelf kan boeken. Datums die alsnog geboekt zijn vallen af;
+    per datum, club en tijd één melding.
+    """
+    seen = set()
+    for slot in missed:
+        key = (slot.get("date"), slot.get("club_name"), slot.get("time_range"))
+        if slot.get("date") in booked_dates or key in seen:
+            continue
+        seen.add(key)
+        logger.error(
+            "Slot gevonden maar niet geboekt: %s op %s, %s %s (%s)",
+            slot.get("club_name"), slot.get("date"), slot.get("court_name"), slot.get("time_range"),
+            slot.get("reason") or "onbekende reden",
+        )
+        notify_slot_missed(
+            slot.get("club_name", ""), slot.get("date", ""), slot.get("time_range", ""),
+            slot.get("court_name", ""), slot.get("reason", ""), slot.get("club_url", ""),
+        )
+
+
 async def main_async(debug: bool, dry_run: bool, target: dict | None = None) -> int:
     load_dotenv()
 
@@ -527,12 +589,13 @@ async def main_async(debug: bool, dry_run: bool, target: dict | None = None) -> 
 
     # Boek alle open datums: na elke boeking zoeken de providers verder zonder die datum
     winners = []
+    missed: list[dict] = []
     for _ in range(len(remaining)):
         provider_requests = [
             (spec.name, build_provider_request(config, credentials, provider_cfg, dry_run, skip_dates, target))
             for spec, credentials, provider_cfg in providers
         ]
-        result = await run_all_providers(provider_requests, debug=debug)
+        result = await run_all_providers(provider_requests, debug=debug, missed=missed)
         if not (result and result.get("success")):
             break
         _handle_success(result, dry_run, state_file, history_file, pending_file)
@@ -544,6 +607,8 @@ async def main_async(debug: bool, dry_run: bool, target: dict | None = None) -> 
         if target:
             target = {**target, "dates": remaining}
         logger.info("Verder zoeken voor: %s", ", ".join(remaining))
+
+    report_missed_slots(missed, skip_dates)
 
     if not winners:
         logger.warning("Geen boeking gemaakt door alle providers")

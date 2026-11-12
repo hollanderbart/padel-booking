@@ -295,3 +295,19 @@ class TestOrderKnop:
         with patch("notify.Notifier") as MockNotifier:
             notify_payment_reminder("Hal 0172", "2026-11-11", "10:00", "https://www.mollie.com/x", None, self.ORDER)
         assert MockNotifier.return_value.send.call_args.kwargs["actions"][0]["uri"] == self.ORDER
+
+
+
+class TestGemistSlotMelding:
+    def test_titel_bericht_en_link_naar_club(self):
+        from unittest.mock import patch as _patch
+
+        from notify import notify_slot_missed
+        with _patch("notify.Notifier") as notifier:
+            notify_slot_missed("Hal 0172", "2026-11-12", "21:00 - 22:30 90 minuten", "Padelbaan 4",
+                               "reCAPTCHA afgewezen", "https://meetandplay.nl/club/88191")
+        kwargs = notifier.return_value.send.call_args.kwargs
+        assert kwargs["title"] == "Baan gevonden, niet geboekt: Hal 0172, do 12-11 21:00"
+        assert "reCAPTCHA afgewezen" in kwargs["message"]
+        assert kwargs["url"] == "https://meetandplay.nl/club/88191"
+        assert kwargs["time_sensitive"] is True
