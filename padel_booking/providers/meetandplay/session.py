@@ -28,6 +28,36 @@ SUBMIT_SELECTOR = 'button[type="submit"], input[type="submit"]'
 NETWORK_ERROR_RE = re.compile(r"net::ERR_[A-Z_]+")
 
 
+# Page.goto die zelfs de HTML (DOMContentLoaded) niet binnen de timeout krijgt: de site reageert niet
+GOTO_TIMEOUT_RE = re.compile(r"Page\.goto: Timeout \d+ms exceeded")
+# Na DOMContentLoaded nog zo lang (best effort) wachten op het volledige 'load'-event
+LOAD_GRACE_MS = 10000
+
+
+def settle(page: Page, timeout: int = LOAD_GRACE_MS) -> None:
+    """
+    Wacht nog even op het volledige 'load'-event, zonder te falen. 'load' wacht ook op externe scripts
+    (Cookiebot, reCAPTCHA, analytics); hangt daar één van, dan staat de pagina zelf er al wel.
+    """
+    with contextlib.suppress(Exception):
+        page.wait_for_load_state("load", timeout=timeout)
+
+
+def goto(page: Page, url: str, timeout: int = 30000) -> None:
+    """
+    Navigeer en wacht op de HTML van de pagina (DOMContentLoaded), daarna best effort op 'load'.
+    Voorheen werd op 'load' gewacht met een harde timeout: een trage externe resource liet dan de hele
+    run mislukken ("Page.goto: Timeout 30000ms exceeded"), terwijl meetandplay.nl zelf gewoon antwoordde.
+    """
+    page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+    settle(page)
+
+
+def reload(page: Page, timeout: int = 30000) -> None:
+    page.reload(wait_until="domcontentloaded", timeout=timeout)
+    settle(page)
+
+
 class SiteUnreachableError(RuntimeError):
     """meetandplay.nl of de KNLTB-login is niet bereikbaar (storing/netwerk) — geen inlogprobleem."""
 SSO_PASSWORD_SELECTOR = 'input[type="password"], input[name="Password"], input[name="password"]'
@@ -118,9 +148,9 @@ class SessionManager:
     def is_logged_in(self, page: Page) -> bool:
         try:
             if not on_meetandplay(page.url):
-                page.goto(BASE_URL, wait_until="load", timeout=15000)
+                goto(page, BASE_URL, timeout=15000)
             else:
-                page.wait_for_load_state("load", timeout=15000)
+                settle(page)
             page.wait_for_timeout(1500)
 
             if not on_meetandplay(page.url):
@@ -179,6 +209,14 @@ class SessionManager:
                     f"Meet & Play niet bereikbaar ({network_error.group(0)}) — storing of netwerkprobleem, "
                     "geen inlogprobleem"
                 ) from e
+            if GOTO_TIMEOUT_RE.search(str(e)):
+                save_debug_screenshot(page, "debug_login_timeout.png")
+                page.close()
+                context.close()
+                raise SiteUnreachableError(
+                    f"Meet & Play reageert niet ({GOTO_TIMEOUT_RE.search(str(e)).group(0)}) — "
+                    "trage site of netwerkprobleem, geen inlogprobleem"
+                ) from e
             logger.error("Fout tijdens automatisch inloggen: %s", e)
             login_ok = False
 
@@ -196,7 +234,7 @@ class SessionManager:
 
     @staticmethod
     def _submit_email(page: Page, email: str) -> None:
-        page.goto(LOGIN_URL, wait_until="load", timeout=30000)
+        goto(page, LOGIN_URL)
         page.wait_for_timeout(1500)
         accept_cookie_banner(page)
 
@@ -219,7 +257,7 @@ class SessionManager:
         page.locator('form[wire\\:submit="submit"]').first.evaluate(
             'el => el.dispatchEvent(new Event("submit", {bubbles:true, cancelable:true}))'
         )
-        page.wait_for_load_state("load", timeout=15000)
+        settle(page, timeout=15000)
         page.wait_for_timeout(2000)
 
     @staticmethod
@@ -231,7 +269,7 @@ class SessionManager:
             return
 
         logger.info("KNLTB ID SSO redirect gevonden")
-        page.goto(sso_match.group(1).replace("&amp;", "&"), wait_until="load", timeout=30000)
+        goto(page, sso_match.group(1).replace("&amp;", "&"))
         page.wait_for_timeout(2000)
 
         username_field = page.locator(
@@ -257,5 +295,5 @@ class SessionManager:
         logger.info("Stap B: wachtwoord invullen op SSO pagina")
         pw_input.first.fill(password)
         if _click_submit_if_present(page):
-            page.wait_for_load_state("load", timeout=30000)
+            settle(page, timeout=30000)
             page.wait_for_timeout(2000)

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from providers.meetandplay.session import SessionManager, SiteUnreachableError
+from providers.meetandplay.session import SessionManager, SiteUnreachableError, goto
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +255,8 @@ class TestAutoLogin:
             _, ok = m.auto_login(browser, "a@b.nl", "pw")
 
         assert ok is True
-        page.goto.assert_any_call("https://meetandplay.nl/knltb-id/sso?a=1&b=2", wait_until="load", timeout=30000)
+        page.goto.assert_any_call("https://meetandplay.nl/knltb-id/sso?a=1&b=2", wait_until="domcontentloaded",
+                                  timeout=30000)
 
     def test_mislukte_login_sluit_context(self, tmp_path):
         m = _make_manager(tmp_path)
@@ -291,3 +292,46 @@ class TestAutoLogin:
 
         _, ok = m.auto_login(browser, "a@b.nl", "pw")
         assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# Trage externe scripts (Cookiebot, reCAPTCHA, analytics) mogen een run niet laten mislukken
+# ---------------------------------------------------------------------------
+
+LOAD_TIMEOUT = Exception('Timeout 10000ms exceeded.\n=========================== logs ===========================\n'
+                         'waiting for event "load"')
+
+
+class TestTrageExterneScripts:
+    """
+    12-11-2026 11:32: meetandplay.nl antwoordde in 0,15 s, maar het 'load'-event (alle externe scripts)
+    kwam niet binnen 15/30 s. Elke navigatie wachtte daarop → "Page.goto: Timeout" → inloggen "mislukt".
+    """
+
+    def test_goto_wacht_op_de_html_niet_op_externe_scripts(self):
+        page = _make_page()
+        page.wait_for_load_state.side_effect = LOAD_TIMEOUT
+        goto(page, "https://www.meetandplay.nl/inloggen")   # mag niet falen
+        page.goto.assert_called_once_with("https://www.meetandplay.nl/inloggen", wait_until="domcontentloaded",
+                                          timeout=30000)
+        page.wait_for_load_state.assert_called_once_with("load", timeout=10000)
+
+    def test_sessiecheck_ziet_ingelogd_ondanks_hangend_load_event(self, tmp_path):
+        m = _make_manager(tmp_path)
+        page = _make_page(url="https://www.meetandplay.nl/")
+        page.wait_for_load_state.side_effect = LOAD_TIMEOUT
+        page.locator.side_effect = lambda sel: MagicMock(count=MagicMock(return_value=1 if "logout" in sel else 0))
+        assert m.is_logged_in(page) is True
+
+    def test_goto_timeout_bij_inloggen_is_geen_inlogprobleem(self, tmp_path):
+        m = _make_manager(tmp_path)
+        page = _make_page()
+        page.goto.side_effect = Exception(
+            'Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to "https://www.meetandplay.nl/inloggen"'
+        )
+        browser, context = _login_browser(page)
+
+        with patch("providers.meetandplay.session.save_debug_screenshot"), \
+                pytest.raises(SiteUnreachableError, match="reageert niet.*geen inlogprobleem"):
+            m.auto_login(browser, "a@b.nl", "pw")
+        context.close.assert_called_once()

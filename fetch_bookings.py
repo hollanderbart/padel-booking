@@ -198,10 +198,10 @@ def _logged_in_context(browser, session_mgr, email: str, password: str):
 
 
 def _scrape_reservations(page) -> list[dict]:
-    from providers.meetandplay.session import accept_cookie_banner
+    from providers.meetandplay.session import accept_cookie_banner, goto
 
     logger.info("Meet & Play reserveringen ophalen (%s)...", MEETANDPLAY_RESERVATIONS_URL)
-    page.goto(MEETANDPLAY_RESERVATIONS_URL, wait_until="load", timeout=30000)
+    goto(page, MEETANDPLAY_RESERVATIONS_URL)
     accept_cookie_banner(page)
 
     # Livewire laadt de kaarten na; zonder reserveringen verschijnt er geen kaart

@@ -1,3 +1,8 @@
+## 2.12.1
+
+- Fix (Meet & Play): elke navigatie wachtte op het volledige `load`-event, dus ook op externe scripts (Cookiebot, reCAPTCHA, analytics). Hing daar één van, dan liep de run vast op `Page.goto: Timeout 30000ms exceeded`, terwijl meetandplay.nl zelf in 0,15 s antwoordde. Dat gebeurde sinds september 24 keer, o.a. op 5-11 bij de vrijgave van Hal 0172 en op 12-11 na de update. Nu wacht de addon op de pagina zelf (`domcontentloaded`) en daarna hooguit 10 s op de rest, zonder te falen
+- Komt de pagina zelf niet binnen de tijd, dan meldt de addon `Meet & Play reageert niet (…) — trage site of netwerkprobleem, geen inlogprobleem` in plaats van "Automatisch inloggen mislukt. Controleer KNLTB_EMAIL/KNLTB_PASSWORD" (screenshot: `debug_login_timeout.png`)
+
 ## 2.12.0
 
 - Fix (Meet & Play): "Betaling starten" werd soms geweigerd met **"reCAPTCHA is ongeldig. Herlaad de pagina en probeer het opnieuw."** (onzichtbare reCAPTCHA v3). De addon klikte dan nog één keer op dezelfde pagina en gaf het op; zo ging op 12-11 een gevonden baan (Hal 0172, 21:00) verloren. Nu herlaadt hij de winkelwagen tussen de pogingen, zoals de melding vraagt, en probeert hij het tot 4 keer. In de log: `reCAPTCHA afgewezen bij 'Betaling starten' (poging n/4)` en, als het niet lukt, `ERROR Betaling starten mislukt (reCAPTCHA afgewezen)`

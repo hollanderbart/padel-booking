@@ -33,6 +33,8 @@ from providers.meetandplay.session import (
     SessionManager,
     SiteUnreachableError,
     accept_cookie_banner,
+    goto,
+    reload,
     save_debug_page,
 )
 
@@ -153,7 +155,7 @@ class MeetAndPlayBooker:
     @staticmethod
     def _club_page_coords(page: Page, url: str) -> list[float] | None:
         try:
-            page.goto(url, wait_until="load", timeout=30000)
+            goto(page, url)
             match = CLUB_PAGE_COORDS_RE.search(page.content())
         except Exception as e:  # noqa: BLE001
             logger.debug("Coördinaten van %s niet opgehaald: %s", url, e)
@@ -306,7 +308,7 @@ class MeetAndPlayBooker:
             city, self._booking["location"]["radius_km"], radius, date_str,
         )
 
-        page.goto(SEARCH_URL, wait_until="load", timeout=30000)
+        goto(page, SEARCH_URL)
         page.wait_for_timeout(1500)
         self._accept_cookies(page)
         self._select_padel(page)
@@ -488,7 +490,7 @@ class MeetAndPlayBooker:
             club["name"], date_str, self._booking["time_start"], self._booking["time_end"]
         )
 
-        page.goto(club["url"], wait_until="load", timeout=60000)
+        goto(page, club["url"], timeout=60000)
         page.wait_for_timeout(1500)
         self._accept_cookies(page)
         self._apply_club_filters(page, int(self._booking.get("duration_minutes", 90)))
@@ -648,7 +650,7 @@ class MeetAndPlayBooker:
     def _reload_cart(self, page: Page) -> None:
         """Winkelwagen herladen (zoals de reCAPTCHA-melding vraagt) en de voorwaarden opnieuw aanvinken."""
         with contextlib.suppress(Exception):
-            page.reload(wait_until="load", timeout=30000)
+            reload(page)
         self._accept_terms(page)
         # reCAPTCHA v3 scoort o.a. op tijd op de pagina: niet direct na het laden klikken
         page.wait_for_timeout(PAY_RETRY_DELAY_MS)
@@ -757,7 +759,7 @@ class MeetAndPlayBooker:
         page = None
         try:
             page = self._context.new_page()
-            page.goto(ORDERS_URL, wait_until="load", timeout=30000)
+            goto(page, ORDERS_URL)
             page.wait_for_selector(ORDER_CARD_SELECTOR, timeout=10000)
             for card in page.locator(ORDER_CARD_SELECTOR).all():
                 text = re.sub(r"\s+", " ", card.inner_text()).lower()
@@ -766,7 +768,7 @@ class MeetAndPlayBooker:
                         and (not start or start.group(0) in text)):
                     href = card.get_attribute("href") or ""
                     order_url = href if href.startswith("http") else f"https://meetandplay.nl{href}"
-                    page.goto(order_url, wait_until="load", timeout=30000)
+                    goto(page, order_url)
                     with contextlib.suppress(Exception):  # de tekst laadt iets later in
                         page.wait_for_selector("text=vastgehouden", timeout=8000)
                     hold = HOLD_UNTIL_RE.search(page.inner_text("body"))

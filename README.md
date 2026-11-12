@@ -502,6 +502,16 @@ bij de volgende geplande run vanzelf opnieuw. Werkt de site in je browser wel, k
 je HA host, bijv. een DNS-blocker (AdGuard, Pi-hole) die `meetandplay.nl` blokkeert (`ERR_NAME_NOT_RESOLVED`
 of een verbinding naar `0.0.0.0`). Sinds v2.8.1 overschrijft zo'n storing `debug_login_failed.png` niet meer.
 
+```
+Meet & Play reageert niet (Page.goto: Timeout 30000ms exceeded) — trage site of netwerkprobleem, geen inlogprobleem
+```
+
+De pagina kwam niet binnen 30 seconden binnen. Sinds v2.12.1 wacht de addon alleen op de pagina zelf
+(DOMContentLoaded) en hooguit 10 seconden extra op externe scripts (Cookiebot, reCAPTCHA, analytics). Vroeger
+wachtte hij op álle scripts, en een trage externe resource liet het inloggen dan "mislukken" (met de
+verkeerde tip om je wachtwoord te controleren). Zie je deze melding nu nog, dan was meetandplay.nl zelf traag
+of onbereikbaar. De schermafdruk staat in `/config/padel/debug_login_timeout.png`.
+
 ### Login mislukt (Playtomic)
 
 - Controleer `playtomic_email` en `playtomic_password`
