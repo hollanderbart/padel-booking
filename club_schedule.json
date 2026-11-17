@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-17T01:53+01:00",
+  "generated_at": "2026-11-17T15:38+01:00",
   "clubs": [
     {
       "club_url": "https://meetandplay.nl/club/70359",
@@ -62,8 +62,8 @@
     },
     {
       "club_url": "https://meetandplay.nl/club/88093",
-      "club_name": "Sportcentrum midden Boskoop",
-      "club_address": "Sportlaan 1 , 2771RW Boskoop",
+      "club_name": "T.V. Boskoop",
+      "club_address": "Mendelweg 14a, 2771 TN BOSKOOP",
       "strategy": "dagelijks",
       "window_days": 8,
       "release_hours": [
