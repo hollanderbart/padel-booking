@@ -1,6 +1,6 @@
 # Release-strategieën padelbanen (Meet & Play)
 
-_Automatisch gegenereerd op 2026-11-18 15:02 (Europe/Amsterdam) door `.github/workflows/booking-research.yml` op basis van de observaties van de laatste 30 dagen. Gemeten als niet-ingelogde bezoeker._
+_Automatisch gegenereerd op 2026-11-19 00:29 (Europe/Amsterdam) door `.github/workflows/booking-research.yml` op basis van de observaties van de laatste 30 dagen. Gemeten als niet-ingelogde bezoeker._
 
 | Club | Adres | Venster | Strategie | Vrijgave | Advies | Obs. |
 |---|---|---|---|---|---|---|
